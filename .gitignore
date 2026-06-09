@@ -1,0 +1,50 @@
+# Only the dashboard and its runtime data ship to Vercel.
+# Everything else (scrapers, raw data, build artifacts, IDE state) stays local.
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Python toolchain
+__pycache__/
+*.pyc
+.venv/
+venv/
+uv.lock
+pyproject.toml
+
+# Scrapers (local-only ETL)
+outlets_scrape.py
+vahan_scraper.py
+vahan_probe.py
+sanity_probe_siripuram
+scraper.docx
+sync_progress.py
+scripts/
+base
+gb_meta.json
+vahan_scrape_config
+
+# Raw data + intermediate build artifacts (regenerated locally)
+reviews/
+build/
+data/
+vahan_data/
+varun_outlets_debug/
+varun_outlets_master.json
+varun_outlets_progress.json
+01_Maruti_Suzuki_True_Value_Varun_Motors_Vishakhapatnam_Siripuram.csv
+claude_resume_1
+vahan_page.html
+vahan_screenshot.png
+img.png
+
+# Empty placeholder GeoJSONs not consumed by the dashboard
+ap_boundary.geojson
+india_states.geojson
+
+# Misc local outputs
+test_*.py
+*.log

@@ -1,0 +1,2464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Varun Motors — Blindspot</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="ap_boundary.js"></script>
+<script src="dashboard_data.js"></script>
+<style id="s1">
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; overflow: hidden; }
+#nav { position: fixed; top: 0; left: 0; right: 0; height: 56px; background: #0b1220; border-bottom: 1px solid #1e293b; display: flex; align-items: center; padding: 0 18px; gap: 18px; z-index: 1000; }
+.nav-brand { font-weight: 700; font-size: 0.98rem; white-space: nowrap; }
+.nav-brand small { color: #64748b; font-weight: 400; margin-left: 6px; font-size: 0.75rem; }
+.nav-tabs { display: flex; gap: 4px; padding: 4px; background: #1e293b; border-radius: 8px; }
+.nav-tab { padding: 7px 18px; border: none; background: transparent; cursor: pointer; color: #94a3b8; font-size: 0.84rem; border-radius: 6px; transition: all 0.15s; font-family: inherit; font-weight: 500; }
+.nav-tab.active { background: #3b82f6; color: #fff; }
+.nav-tab:hover:not(.active) { color: #e2e8f0; background: rgba(255,255,255,0.04); }
+.nav-spacer { flex: 1; }
+.nav-stat { font-size: 0.75rem; color: #94a3b8; white-space: nowrap; }
+.nav-stat strong { color: #e2e8f0; font-weight: 600; }
+#filter-bar { position: fixed; top: 56px; left: 0; right: 0; height: 52px; background: #131c2e; border-bottom: 1px solid #1e293b; display: flex; align-items: center; padding: 0 18px; gap: 12px; flex-wrap: nowrap; overflow: visible; z-index: 1500; }
+.filter-group { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.filter-label { font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin-right: 4px; }
+</style>
+<style id="s2">
+.pill { padding: 5px 11px; border-radius: 999px; border: 1px solid #334155; background: transparent; color: #cbd5e1; font-size: 0.74rem; cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.15s; line-height: 1.4; }
+.pill:hover { background: #1e293b; color: #fff; }
+.pill.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+.dropdown-wrap { position: relative; }
+.dropdown-btn { padding: 7px 12px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.78rem; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.dropdown-btn:hover { border-color: #475569; }
+.dropdown-btn .caret { color: #64748b; font-size: 0.7rem; }
+.dropdown-btn .filter-label { color: #64748b; font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin: 0; }
+.dropdown-panel { position: absolute; top: 38px; left: 0; background: #1e293b; border: 1px solid #334155; border-radius: 10px; min-width: 280px; max-width: 360px; max-height: 460px; overflow-y: auto; box-shadow: 0 12px 32px rgba(0,0,0,0.6); padding: 10px; z-index: 2000; display: none; }
+.dropdown-panel.open { display: block; }
+.dropdown-search { width: 100%; padding: 7px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #e2e8f0; font-size: 0.78rem; font-family: inherit; margin-bottom: 8px; }
+.dropdown-actions { display: flex; gap: 4px; margin-bottom: 6px; }
+.dropdown-actions .pill { font-size: 0.7rem; flex: 1; text-align: center; }
+.dropdown-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; cursor: pointer; font-size: 0.78rem; }
+.dropdown-item:hover { background: #334155; }
+.dropdown-item label { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1; }
+.dropdown-item input { margin: 0; accent-color: #3b82f6; cursor: pointer; }
+.dropdown-item .sub { color: #64748b; font-size: 0.7rem; margin-left: auto; }
+.dd-section-title { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin-bottom: 6px; margin-top: 4px; }
+.dd-pill-row { display: flex; flex-wrap: wrap; gap: 4px; }
+#custom-range-wrap select { padding: 5px 8px; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.74rem; border-radius: 6px; font-family: inherit; }
+</style>
+<style id="s3">
+#view-container { position: fixed; top: 108px; left: 0; right: 0; bottom: 0; overflow: hidden; }
+.view { display: none; width: 100%; height: 100%; }
+.view.active { display: block; }
+#map-view #map { width: 100%; height: 100%; background: #0f172a; }
+.map-overlay { position: absolute; background: rgba(30, 41, 59, 0.95); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); z-index: 500; padding: 12px 14px; backdrop-filter: blur(8px); }
+.overlay-title { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 600; margin-bottom: 8px; }
+/* Bottom-right stack: tile picker + legend, both collapsible */
+.bottomright-stack { position: absolute; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; z-index: 500; }
+.collapsible-card { background: rgba(30,41,59,0.95); border: 1px solid #334155; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); backdrop-filter: blur(8px); overflow: hidden; transition: max-height 0.2s ease; }
+.cc-header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none; font-size: 0.74rem; color: #cbd5e1; }
+.cc-header:hover { background: rgba(255,255,255,0.04); }
+.cc-header .cc-title { font-weight: 600; flex: 1; }
+.cc-header .cc-current { color: #94a3b8; font-size: 0.7rem; }
+.cc-header .cc-caret { color: #64748b; font-size: 0.7rem; transition: transform 0.2s ease; }
+.collapsible-card.open .cc-header .cc-caret { transform: rotate(180deg); }
+.cc-body { padding: 10px 14px 12px; border-top: 1px solid #1e293b; max-height: 0; overflow: hidden; transition: max-height 0.25s ease, padding 0.2s ease; }
+.collapsible-card.open .cc-body { max-height: 360px; overflow-y: auto; padding: 10px 14px 12px; }
+.collapsible-card:not(.open) .cc-body { padding-top: 0; padding-bottom: 0; border-top: none; }
+#legend-card { min-width: 220px; max-width: 260px; }
+#tile-card { min-width: 160px; }
+.legend-section { margin-bottom: 10px; }
+.legend-section:last-child { margin-bottom: 0; }
+.legend-sub { font-size: 0.65rem; color: #94a3b8; font-weight: 600; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+.legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; font-size: 0.72rem; }
+.leg-ico { font-size: 13px; width: 16px; text-align: center; }
+.leg-dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.leg-sq { width: 10px; height: 10px; transform: rotate(45deg); flex-shrink: 0; }
+.tile-options { display: flex; flex-direction: column; gap: 4px; }
+.tile-options .pill { width: 100%; text-align: left; }
+/* All/Data toggle (single button — pill switch) */
+.data-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: rgba(30,41,59,0.95); border: 1px solid #334155; color: #e2e8f0; font-size: 0.78rem; cursor: pointer; font-family: inherit; box-shadow: 0 4px 16px rgba(0,0,0,0.5); backdrop-filter: blur(8px); }
+.data-toggle:hover { border-color: #475569; }
+.data-toggle.on { background: rgba(59,130,246,0.85); border-color: #3b82f6; color: #fff; }
+.data-toggle .dt-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; transition: background 0.15s; }
+.data-toggle.on .dt-dot { background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,0.25); }
+.data-toggle .dt-label { font-weight: 600; }
+</style>
+<style id="s4">
+.map-pin-wrap { position: relative; }
+.map-pin-svg { display: block; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35)); }
+.map-pin-emoji { position: absolute; display: flex; align-items: center; justify-content: center; pointer-events: none; font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif; line-height: 1; }
+.map-pin-pulse { position: absolute; border-radius: 50%; background: var(--pulse-color); z-index: -1; pointer-events: none; animation: pinPulse 3s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes pinPulse { 0% { transform: scale(0.95); opacity: 0.42; } 80% { transform: scale(1.85); opacity: 0; } 100% { transform: scale(1.85); opacity: 0; } }
+.outlet-label { background: rgba(15,23,42,0.88) !important; color: #e2e8f0 !important; border: 1px solid rgba(255,255,255,0.18) !important; padding: 1px 6px !important; font-size: 0.68rem !important; border-radius: 4px !important; white-space: nowrap !important; box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important; }
+.outlet-label::before { display: none !important; }
+.outlet-label-hidden { display: none !important; }
+.leaflet-popup-content-wrapper { background: #1e293b !important; color: #e2e8f0 !important; border-radius: 10px !important; border: 1px solid #475569 !important; box-shadow: 0 8px 30px rgba(0,0,0,0.5) !important; min-width: 280px; }
+.leaflet-popup-tip { background: #1e293b !important; }
+.leaflet-popup-close-button { color: #94a3b8 !important; }
+.popup-content h3 { margin: 0 0 2px; font-size: 0.96rem; }
+.popup-content .sub { color: #94a3b8; font-size: 0.72rem; margin-bottom: 8px; }
+.popup-divider { height: 1px; background: #334155; margin: 10px 0 8px; }
+.section-label { font-size: 0.68rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 8px; margin-bottom: 4px; }
+</style>
+<style id="s5">
+.analytics-grid { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(280px, auto); gap: 14px; padding: 14px; overflow-y: auto; height: 100%; }
+.chart-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; min-height: 280px; }
+.chart-card.chart-large { grid-column: span 3; min-height: 320px; }
+.chart-title { font-weight: 600; font-size: 0.92rem; margin-bottom: 2px; }
+.chart-sub { font-size: 0.7rem; color: #94a3b8; margin-bottom: 10px; }
+.chart-card canvas { flex: 1; min-height: 0; }
+.mentions-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.mention { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; padding: 6px 8px; background: #0f172a; border-radius: 6px; border-left: 3px solid #475569; }
+.mention.pos { border-left-color: #22c55e; }
+.mention.neg { border-left-color: #ef4444; }
+.mention .count { color: #64748b; font-size: 0.7rem; margin-left: auto; }
+@media (max-width: 1100px) { .analytics-grid { grid-template-columns: repeat(2, 1fr); } .chart-card.chart-large { grid-column: span 2; } }
+@media (max-width: 700px) { .analytics-grid { grid-template-columns: 1fr; } .chart-card.chart-large { grid-column: span 1; } }
+</style>
+<style id="s6">
+/* Bigger popup with grid layout — keeps content from spilling vertically */
+.leaflet-popup.popup-wide-wrap .leaflet-popup-content-wrapper { min-width: 800px !important; max-width: 880px !important; }
+.leaflet-popup.popup-wide-wrap .leaflet-popup-content { width: auto !important; min-width: 780px !important; max-height: calc(100vh - 220px); overflow-y: auto; }
+/* RTO popup — wider for the trend chart */
+.leaflet-popup.popup-rto-wrap .leaflet-popup-content-wrapper { min-width: 540px !important; max-width: 600px !important; }
+.leaflet-popup.popup-rto-wrap .leaflet-popup-content { width: auto !important; min-width: 520px !important; max-height: calc(100vh - 220px); overflow-y: auto; }
+.popup-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+.popup-grid-main { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(360px, 1.4fr); gap: 14px; margin-top: 10px; }
+.popup-col { background: #0f172a; border-radius: 6px; padding: 8px 10px; border-left: 3px solid #475569; }
+.popup-col.neg { border-left-color: #ef4444; }
+.popup-col.pos { border-left-color: #22c55e; }
+.popup-col .col-head { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 6px; }
+.popup-col.neg .col-head { color: #fca5a5; }
+.popup-col.pos .col-head { color: #86efac; }
+.cat-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; margin: 1px -4px; border-radius: 4px; cursor: pointer; font-size: 0.75rem; transition: background 0.12s; }
+.cat-row:hover { background: rgba(255,255,255,0.06); }
+.cat-row .cat-name { flex: 1; color: #cbd5e1; }
+.cat-row .cat-count { color: #64748b; font-weight: 600; font-size: 0.72rem; }
+.cat-row.empty { color: #475569; cursor: default; font-style: italic; }
+.cat-row.empty:hover { background: transparent; }
+/* Entity row inside popup — clickable, mirrors cat-row */
+.ent-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; margin: 1px -4px; border-radius: 4px; cursor: pointer; font-size: 0.72rem; transition: background 0.12s; }
+.ent-row:hover { background: rgba(255,255,255,0.06); }
+.ent-row .ent-name { flex: 1; color: #cbd5e1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ent-row .ent-bar { width: 80px; height: 6px; background: #ef4444; border-radius: 2px; overflow: hidden; display: flex; }
+.ent-row .ent-count { width: 46px; text-align: right; font-weight: 600; }
+.score-delta { font-size: 0.68rem; padding: 2px 6px; border-radius: 999px; margin-left: 6px; font-weight: 600; }
+.score-delta.up { background: rgba(34,197,94,0.18); color: #4ade80; }
+.score-delta.down { background: rgba(239,68,68,0.18); color: #f87171; }
+.score-delta.flat { background: rgba(100,116,139,0.18); color: #94a3b8; }
+/* RTO popup chart block */
+.rto-chart-block { margin-top: 10px; padding: 8px 10px; background: #0f172a; border-radius: 6px; border: 1px solid #334155; }
+.rto-chart-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.rto-chart-controls .dd-pill-row .pill { font-size: 0.7rem; padding: 4px 10px; }
+.rto-chart-controls .rto-year-select { padding: 4px 8px; background: #1e293b; border: 1px solid #334155; color: #e2e8f0; font-size: 0.74rem; border-radius: 6px; font-family: inherit; }
+.rto-chart-block canvas { width: 100% !important; height: 180px !important; }
+/* Mini-map "magnifying lens" — anchored top-right of the popup */
+.popup-top-row { display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 12px; align-items: start; margin-bottom: 8px; }
+.popup-top-left { min-width: 0; }
+.popup-top-right { min-width: 0; }
+.minimap-wrap { margin: 0; border: 1px solid #475569; border-radius: 8px; overflow: hidden; background: #0b1220; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.45); }
+.minimap-canvas { width: 100%; height: 200px; background: #0f172a; }
+.minimap-canvas .leaflet-container { background: #0f172a; }
+.minimap-legend { position: absolute; bottom: 4px; left: 4px; background: rgba(15,23,42,0.85); padding: 2px 6px; border-radius: 4px; font-size: 0.56rem; color: #94a3b8; pointer-events: none; line-height: 1.3; }
+.minimap-empty { padding: 16px 12px; font-size: 0.7rem; color: #94a3b8; text-align: center; }
+.minimap-center-ring { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #facc15; box-shadow: 0 0 0 3px rgba(250,204,21,0.30); background: transparent; }
+.minimap-pin { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.9); box-shadow: 0 1px 3px rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; font-size: 8px; cursor: pointer; transition: transform 0.12s; }
+.minimap-pin:hover { transform: scale(1.35); z-index: 10; }
+.minimap-tooltip { background: rgba(15,23,42,0.95) !important; color: #e2e8f0 !important; border: 1px solid #475569 !important; padding: 4px 8px !important; font-size: 0.7rem !important; border-radius: 4px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.5) !important; }
+.minimap-tooltip::before { display: none !important; }
+/* Google reviews summary box in popups */
+.gmap-box { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+.gmap-row { display: flex; align-items: center; gap: 8px; font-size: 0.78rem; }
+.gmap-row + .gmap-row { margin-top: 4px; padding-top: 4px; border-top: 1px dashed #334155; }
+.gmap-row.gmap-row-sub { font-size: 0.72rem; }
+.gmap-row .gmap-stars { color: #f59e0b; letter-spacing: 1px; font-size: 0.78rem; }
+.gmap-row .gmap-rating { font-weight: 700; color: #e2e8f0; min-width: 24px; }
+.gmap-row .gmap-meta { color: #94a3b8; font-size: 0.7rem; flex: 1; }
+.rv-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.rv-back { background: #1e293b; border: 1px solid #334155; color: #e2e8f0; padding: 4px 10px; border-radius: 6px; font-size: 0.74rem; cursor: pointer; font-family: inherit; }
+.rv-back:hover { background: #334155; }
+.rv-title { font-weight: 600; font-size: 0.95rem; flex: 1; }
+.rv-tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.66rem; font-weight: 700; }
+.rv-tag.pos { background: rgba(34,197,94,0.18); color: #4ade80; }
+.rv-tag.neg { background: rgba(239,68,68,0.18); color: #f87171; }
+.rv-cat { font-size: 0.74rem; color: #cbd5e1; font-weight: 500; }
+.rv-meta { font-size: 0.72rem; color: #94a3b8; margin-bottom: 8px; }
+.rv-body { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.rv-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #334155; }
+.rv-count { font-size: 0.72rem; color: #94a3b8; }
+.review-card { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+.review-card .rc-meta { display: flex; align-items: center; gap: 8px; font-size: 0.68rem; color: #94a3b8; margin-bottom: 4px; }
+.review-card .stars { color: #f59e0b; letter-spacing: 1px; }
+.review-card .rc-text { font-size: 0.78rem; line-height: 1.45; color: #e2e8f0; }
+.review-card mark.absa-hl { background: #facc15; color: #1e293b; padding: 1px 3px; border-radius: 3px; font-weight: 600; }
+.load-more-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.74rem; cursor: pointer; font-family: inherit; }
+.load-more-btn:hover { background: #334155; }
+.load-more-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* Rank badge on top/bottom outlets in selection */
+.rank-badge { position: absolute; top: -2px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; font-size: 0.62rem; font-weight: 700; display: flex; align-items: center; justify-content: center; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }
+.rank-badge.top { background: #16a34a; }
+.rank-badge.bottom { background: #ef4444; }
+/* Insights modal */
+#insights-overlay { position: fixed; inset: 0; background: rgba(7,12,24,0.72); backdrop-filter: blur(2px); z-index: 2200; display: none; align-items: flex-start; justify-content: center; padding: 80px 24px 24px; overflow-y: auto; }
+#insights-overlay.open { display: flex; }
+#insights-modal { width: 100%; max-width: 760px; background: #0f172a; border: 1px solid #334155; border-radius: 14px; box-shadow: 0 24px 60px rgba(0,0,0,0.7); display: flex; flex-direction: column; max-height: calc(100vh - 120px); }
+.ins-header { display: flex; align-items: flex-start; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid #1e293b; }
+.ins-header .ins-title { flex: 1; }
+.ins-header h2 { font-size: 1.12rem; margin-bottom: 4px; }
+.ins-header .ins-sub { font-size: 0.78rem; color: #94a3b8; }
+.ins-close { background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; padding: 0 6px; line-height: 1; }
+.ins-close:hover { color: #e2e8f0; }
+.ins-body { flex: 1; overflow-y: auto; padding: 18px 22px 22px; }
+.ins-section { margin-bottom: 22px; }
+.ins-section:last-child { margin-bottom: 0; }
+.ins-section-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+.ins-section-head h3 { font-size: 0.92rem; }
+.ins-section-head .ins-section-sub { font-size: 0.72rem; color: #64748b; }
+.ins-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; border-left: 3px solid #475569; }
+.ins-card.bad { border-left-color: #ef4444; }
+.ins-card.good { border-left-color: #22c55e; }
+.ins-card.warn { border-left-color: #f59e0b; }
+.ins-card .ic-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ins-card .ic-head .ic-name { font-weight: 600; font-size: 0.88rem; }
+.ins-card .ic-head .ic-meta { color: #94a3b8; font-size: 0.74rem; }
+.ins-card .ic-head .ic-score { margin-left: auto; font-size: 0.92rem; font-weight: 700; }
+.ins-card .ic-body { font-size: 0.82rem; line-height: 1.5; color: #cbd5e1; }
+.ins-card .ic-body em { color: #fbbf24; font-style: normal; font-weight: 600; }
+.ins-empty { color: #64748b; font-size: 0.82rem; font-style: italic; padding: 10px 0; }
+</style>
+</head>
+<body>
+<div id="root">
+
+<nav id="nav">
+  <div class="nav-brand">Varun Motors <small>· Blindspot</small></div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-view="map-view">Map</button>
+    <button class="nav-tab" data-view="analytics-view">Analytics</button>
+  </div>
+  <div class="nav-spacer"></div>
+  <div class="nav-stat" id="range-summary"></div>
+  <div class="nav-stat" style="opacity:0.4;">·</div>
+  <div class="nav-stat"><strong id="nav-outlets">—</strong> outlets · <strong id="nav-rtos">—</strong> RTOs · <strong id="nav-cities">—</strong> cities</div>
+</nav>
+
+<div id="filter-bar">
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-time-btn"><span class="filter-label">Time</span><span id="dd-time-label">Latest year</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-time" style="min-width:300px;">
+        <div class="dd-section-title">Preset</div>
+        <div class="dd-pill-row">
+          <button class="pill active" data-preset="latest-year">Latest year</button>
+          <button class="pill" data-preset="last-3m">3m</button>
+          <button class="pill" data-preset="last-6m">6m</button>
+          <button class="pill" data-preset="last-12m">12m</button>
+          <button class="pill" data-preset="last-5y">5y</button>
+          <button class="pill" data-preset="custom">Custom</button>
+        </div>
+        <div id="custom-range-wrap" style="display:none;margin-top:10px;">
+          <div class="dd-section-title">Custom range</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <select id="from-year"></select><select id="from-month"></select>
+            <span style="color:#64748b;font-size:0.75rem;">to</span>
+            <select id="to-year"></select><select id="to-month"></select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-cities-btn"><span class="filter-label">Cities</span><span id="dd-cities-label">All</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-cities">
+        <input type="text" class="dropdown-search" id="dd-cities-search" placeholder="Search cities…">
+        <div class="dropdown-actions"><button class="pill" data-action="all">All</button><button class="pill" data-action="none">None</button></div>
+        <div id="dd-cities-list"></div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-districts-btn"><span class="filter-label">Districts</span><span id="dd-districts-label">All</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-districts">
+        <input type="text" class="dropdown-search" id="dd-districts-search" placeholder="Search districts…">
+        <div class="dropdown-actions"><button class="pill" data-action="all">All</button><button class="pill" data-action="none">None</button></div>
+        <div id="dd-districts-list"></div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-type-btn"><span class="filter-label">Type</span><span id="dd-type-label">All</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-type" style="min-width:200px;">
+        <div class="dropdown-actions"><button class="pill" data-action="all">All</button><button class="pill" data-action="none">None</button></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-div="arena" checked><span>🚗 Arena</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-div="nexa" checked><span>💎 Nexa</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-div="service" checked><span>🛠️ Service</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-div="true_value" checked><span>🤝 True Value</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-div="commercial" checked><span>🚚 Commercial</span></label></div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-cats-btn"><span class="filter-label">Categories</span><span id="dd-cats-label">All</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-cats" style="min-width:240px;">
+        <div class="dropdown-actions"><button class="pill" data-action="all">All</button><button class="pill" data-action="none">None</button></div>
+        <div id="dd-cats-list"></div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-cmp-btn"><span class="filter-label">Compare</span><span id="dd-cmp-label">vs prior</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-cmp" style="min-width:200px;">
+        <div class="dropdown-item"><label><input type="radio" name="cmp" value="off"><span>Off</span></label></div>
+        <div class="dropdown-item"><label><input type="radio" name="cmp" value="prior" checked><span>vs prior period</span></label></div>
+        <div class="dropdown-item"><label><input type="radio" name="cmp" value="yoy"><span>YoY (same window last year)</span></label></div>
+      </div>
+    </div>
+  </div>
+  <div class="filter-group">
+    <div class="dropdown-wrap">
+      <button class="dropdown-btn" id="dd-layers-btn"><span class="filter-label">Layers</span><span id="dd-layers-label">Outlets · RTOs</span> <span class="caret">▾</span></button>
+      <div class="dropdown-panel" id="dd-layers" style="min-width:220px;">
+        <div class="dropdown-item"><label><input type="checkbox" data-layer="outlets" checked><span>Outlets</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-layer="rtos" checked><span>RTOs</span></label></div>
+        <div class="dropdown-item"><label><input type="checkbox" data-layer="heatmap"><span>Heatmap</span></label></div>
+        <div style="margin:8px 0 4px;border-top:1px solid #334155;padding-top:8px;font-size:0.62rem;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">RTO color mode</div>
+        <div class="dropdown-item"><label><input type="radio" name="rtomode" value="share" checked><span>Maruti share</span></label></div>
+        <div class="dropdown-item"><label><input type="radio" name="rtomode" value="cross"><span>Cross-signal quadrant</span></label></div>
+      </div>
+    </div>
+  </div>
+  <div class="nav-spacer"></div>
+  <button class="dropdown-btn" id="btn-insights" style="border-color:#3b82f6;color:#bfdbfe;">Insights</button>
+</div>
+
+<div id="view-container">
+  <section class="view active" id="map-view">
+    <div id="map"></div>
+    <div class="bottomright-stack">
+      <button class="data-toggle on" id="data-toggle" title="Toggle: show only items with data">
+        <span class="dt-dot"></span>
+        <span class="dt-label" id="dt-label">Data only</span>
+      </button>
+      <div class="collapsible-card" id="tile-card">
+        <div class="cc-header">
+          <span class="cc-title">Map</span>
+          <span class="cc-current" id="tile-current">Streets</span>
+          <span class="cc-caret">▾</span>
+        </div>
+        <div class="cc-body">
+          <div class="tile-options" id="tile-btns"></div>
+        </div>
+      </div>
+      <div class="collapsible-card" id="legend-card">
+        <div class="cc-header">
+          <span class="cc-title">Legend</span>
+          <span class="cc-caret">▾</span>
+        </div>
+        <div class="cc-body" id="legend-body"></div>
+      </div>
+    </div>
+  </section>
+  <section class="view" id="analytics-view">
+    <div class="analytics-grid">
+      <div class="chart-card chart-large"><div class="chart-title">Outlet Rankings · Pulse Score</div><div class="chart-sub" id="rank-sub">Best & worst among selected outlets with reviews</div><canvas id="chart-rank"></canvas></div>
+      <div class="chart-card"><div class="chart-title">Pulse by Category</div><div class="chart-sub">Across selected outlets · Pulse Score scale</div><canvas id="chart-category"></canvas></div>
+      <div class="chart-card"><div class="chart-title">Pulse Score Trend</div><div class="chart-sub">Monthly Pulse Score (−5 to +5)</div><canvas id="chart-trend"></canvas></div>
+      <div class="chart-card"><div class="chart-title">Outlets by City</div><div class="chart-sub">Type breakdown</div><canvas id="chart-cities"></canvas></div>
+      <div class="chart-card"><div class="chart-title">Maruti Share by RTO</div><div class="chart-sub">Top 15 in selection</div><canvas id="chart-rto"></canvas></div>
+      <div class="chart-card"><div class="chart-title">Top Callouts</div><div class="chart-sub">Most-cited callouts</div><div id="mentions-list" class="mentions-list"></div></div>
+      <div class="chart-card chart-large"><div class="chart-title">Cross-signal · Maruti share × Pulse Score</div><div class="chart-sub">One dot per RTO area joined to nearby outlets · dot size = car volume · color = quadrant</div><canvas id="chart-cross"></canvas></div>
+    </div>
+  </section>
+</div>
+
+<div id="insights-overlay" aria-hidden="true">
+  <div id="insights-modal" role="dialog" aria-labelledby="insights-title">
+    <div class="ins-header">
+      <div class="ins-title">
+        <h2 id="insights-title">Blindspot Insights</h2>
+        <div class="ins-sub" id="insights-sub">—</div>
+      </div>
+      <button class="ins-close" id="insights-close" aria-label="Close">×</button>
+    </div>
+    <div class="ins-body" id="insights-body"></div>
+  </div>
+</div>
+
+</div>
+<script id="js-main">
+// ===== Constants & Helpers =====
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear();
+const CURRENT_MONTH = NOW.getMonth();
+
+const DIV_LABEL  = { arena:'Arena', nexa:'Nexa', commercial:'Commercial', service:'Service', true_value:'True Value' };
+const ICON_EMOJI = { arena:'🚗', nexa:'💎', commercial:'🚚', service:'🛠️', true_value:'🤝' };
+const CAT_LABEL = { staff:'Staff', service_quality:'Service Quality', communication:'Communication', delivery:'Delivery', ambiance:'Ambiance', pricing:'Pricing', wait_time:'Wait Time', followup:'Followup', cleanliness:'Cleanliness', other:'Other' };
+
+function scoreColor10(s) {
+  // s is on the −5 to +5 scale
+  if (s == null) return '#64748b';
+  if (s >=  4)   return '#16a34a';
+  if (s >=  2.5) return '#22c55e';
+  if (s >=  1)   return '#84cc16';
+  if (s >=  0)   return '#eab308';
+  if (s >= -1)   return '#f59e0b';
+  if (s >= -2.5) return '#f97316';
+  return '#ef4444';
+}
+function to5(s10) { return s10 == null ? null : s10 - 5; }
+function fmtScore5(s) { if (s == null) return '–'; const sign = s > 0 ? '+' : (s < 0 ? '' : '±'); return `${sign}${s.toFixed(1)}`; }
+function fmtDelta(d) {
+  if (d == null || Math.abs(d) < 0.05) return { cls: 'flat', txt: '· flat' };
+  return { cls: d > 0 ? 'up' : 'down', txt: (d > 0 ? '▲ +' : '▼ ') + d.toFixed(1) };
+}
+function shareColor(pct) {
+  if (pct >= 50) return '#16a34a';
+  if (pct >= 35) return '#eab308';
+  if (pct >= 20) return '#f97316';
+  return '#ef4444';
+}
+function fmtNum(n) {
+  if (n == null || Number.isNaN(n)) return '-';
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return String(n);
+}
+function hexToRgb(hex) {
+  const h = hex.replace('#',''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)].join(', ');
+}
+</script>
+<script id="js1">
+// ===== Time Range Sum Functions =====
+function sumRangeRTO(rto, fromY, fromM, toY, toM) {
+  let cars=0, maruti=0;
+  const y0=Math.min(fromY,toY), y1=Math.max(fromY,toY);
+  for (let y=y0; y<=y1; y++) {
+    const yd = rto.years[String(y)]; if (!yd) continue;
+    const m0 = (y===fromY)?fromM:1, m1=(y===toY)?toM:12;
+    for (let m=m0; m<=m1; m++) { cars += yd.cars[m-1]||0; maruti += yd.maruti[m-1]||0; }
+  }
+  return { cars, maruti, share: cars>0 ? maruti/cars : null };
+}
+function sumRangeDealer(dealer, fromY, fromM, toY, toM) {
+  const dist=[0,0,0,0,0]; let count=0;
+  const idx0=fromY*12+(fromM-1), idx1=toY*12+(toM-1);
+  for (const [ym,d] of Object.entries(dealer.reviews_by_month||{})) {
+    const [y,m]=ym.split('-').map(Number); const idx=y*12+(m-1);
+    if (idx<idx0||idx>idx1) continue;
+    count += d.count;
+    if (d.by_rating) for (let i=0;i<5;i++) dist[i] += d.by_rating[i]||0;
+  }
+  const rated=dist.reduce((a,b)=>a+b,0);
+  const positive=dist[3]+dist[4];
+  // Sentiment on −5..+5: (positive_share × 2 − 1) × 5 = positive_share × 10 − 5
+  const sentiment = rated>0 ? (positive/rated)*10 - 5 : null;
+  return { count, dist, rated, positive, neutral:dist[2], negative:dist[0]+dist[1], sentiment };
+}
+
+// ===== Range Presets =====
+function addMonths(anchorY, anchorM, deltaMonths) {
+  const toIdx = anchorY*12+(anchorM-1);
+  const fromIdx = toIdx + deltaMonths + 1;
+  return { fromY: Math.floor(fromIdx/12), fromM: (fromIdx%12)+1, toY: anchorY, toM: anchorM,
+           label: `${MONTHS[(fromIdx%12)]} ${Math.floor(fromIdx/12)} – ${MONTHS[anchorM-1]} ${anchorY}` };
+}
+function getCustomRange() {
+  const fy=+document.getElementById('from-year').value, fm=+document.getElementById('from-month').value;
+  const ty=+document.getElementById('to-year').value, tm=+document.getElementById('to-month').value;
+  return { fromY:fy, fromM:fm, toY:ty, toM:tm, label:`${MONTHS[fm-1]} ${fy} – ${MONTHS[tm-1]} ${ty}` };
+}
+function defaultYear() {
+  const cy=CURRENT_YEAR;
+  for (const r of DASHBOARD_DATA.rtos) { const yd=r.years[String(cy)]; if (yd && yd.cars[10]+yd.cars[11]>0) return cy; }
+  return cy-1;
+}
+const DEFAULT_YEAR = defaultYear();
+const PRESETS = {
+  'latest-year': () => ({ fromY:DEFAULT_YEAR, fromM:1, toY:DEFAULT_YEAR, toM:12, label:`${DEFAULT_YEAR} (full year)` }),
+  'last-3m':  () => addMonths(CURRENT_YEAR, CURRENT_MONTH+1, -3),
+  'last-6m':  () => addMonths(CURRENT_YEAR, CURRENT_MONTH+1, -6),
+  'last-12m': () => addMonths(CURRENT_YEAR, CURRENT_MONTH+1, -12),
+  'last-5y':  () => ({ fromY:DEFAULT_YEAR-4, fromM:1, toY:DEFAULT_YEAR, toM:12, label:`${DEFAULT_YEAR-4}–${DEFAULT_YEAR}` }),
+  'custom':   () => getCustomRange()
+};
+let activePreset = 'latest-year';
+</script>
+<script id="js2">
+// ===== Filter State =====
+const CITIES = DASHBOARD_DATA.cities || [];
+const RTO_TO_CITY = {}, DEALER_TO_CITY = {};
+CITIES.forEach(c => {
+  c.rto_codes.forEach(code => { RTO_TO_CITY[code] = c.city; });
+  c.dealer_indices.forEach(idx => { DEALER_TO_CITY[idx] = c.city; });
+});
+const selectedCities = new Set(CITIES.map(c => c.city));
+// Districts derived from dealers
+const ALL_DISTRICTS = Array.from(new Set(DASHBOARD_DATA.dealers.map(d => d.district).filter(Boolean))).sort();
+const selectedDistricts = new Set(ALL_DISTRICTS);
+const ALL_DIVISIONS = ['arena','nexa','service','true_value','commercial'];
+const selectedDivisions = new Set(ALL_DIVISIONS);  // all selected = no filter
+const selectedCategories = new Set();   // empty set = all categories (no filter)
+let compareMode = 'prior';   // 'off' | 'prior' | 'yoy'
+let dataOnlyMode = true;     // start with Data-only — hides outlets/RTOs with no signals
+let rtoColorMode = 'share';  // 'share' | 'cross' (cross-signal quadrant)
+const layerState = { outlets: true, rtos: true, heatmap: false };
+
+// "Data" mode predicates
+function outletHasData(d) {
+  return (d.reviews_total > 0) || (d.absa_overall != null) || ((d.absa_reviews || []).length > 0);
+}
+function rtoHasDataInRange(rto, range) {
+  return sumRangeRTO(rto, range.fromY, range.fromM, range.toY, range.toM).cars > 0;
+}
+
+// ===== Cross-signal: spatial join + quadrant classification =====
+const JOIN_RADIUS_KM = 30;        // outlet → nearest-RTO match radius
+// Thresholds — tuned for a Maruti dealer who *should* dominate every market.
+// Sentiment +1 still means 40% of customers are upset; treat that as weak.
+// Share 45% is roughly Maruti's national-avg lower bound; below = under-performing.
+const SHARE_BAR_PCT = 45;
+const SENT_BAR = 1.0;
+const SHARE_DELTA_BAR = -1;       // pp drop vs prior counts as "share fell"
+const CROSS_COLORS = {
+  internal:   '#b91c1c',  // red flag
+  lead:       '#f59e0b',  // amber warn
+  competitor: '#6366f1',  // indigo
+  healthy:    '#16a34a',
+  no_data:    '#475569',
+};
+const CROSS_LABEL = {
+  internal:   'Operations focus',
+  lead:       'Early signal',
+  competitor: 'Market dynamics',
+  healthy:    'Performing strong',
+  no_data:    'No outlet data',
+};
+function haversineKm(a, b) {
+  const toRad = x => x * Math.PI / 180;
+  const dlat = toRad(b[0]-a[0]), dlon = toRad(b[1]-a[1]);
+  const h = Math.sin(dlat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dlon/2)**2;
+  return 6371 * 2 * Math.asin(Math.sqrt(h));
+}
+// Build a map: rto.code -> array of {dealerIdx, dealer, kmFromRTO}.
+// Only outlets that pass the current visibility filter (city/division/etc) are joined.
+function joinOutletsToRTOs(visibleDealerIdxs, range) {
+  const out = {};
+  visibleDealerIdxs.forEach(i => {
+    const d = DASHBOARD_DATA.dealers[i];
+    if (!outletHasData(d)) return;
+    let bestRto = null, bestKm = Infinity;
+    DASHBOARD_DATA.rtos.forEach(r => {
+      const km = haversineKm([d.lat,d.lng],[r.lat,r.lng]);
+      if (km < bestKm) { bestKm = km; bestRto = r; }
+    });
+    if (!bestRto || bestKm > JOIN_RADIUS_KM) return;
+    if (!out[bestRto.code]) out[bestRto.code] = [];
+    out[bestRto.code].push({ dealerIdx: i, dealer: d, km: bestKm });
+  });
+  return out;
+}
+// For a given RTO + its joined outlets in range, compute aggregate stats.
+function rtoCrossStats(rto, outletList, range, prior) {
+  const cur = sumRangeRTO(rto, range.fromY, range.fromM, range.toY, range.toM);
+  const prv = prior ? sumRangeRTO(rto, prior.fromY, prior.fromM, prior.toY, prior.toM) : null;
+  const sharePct = cur.share != null ? cur.share*100 : null;
+  const shareDeltaPp = (prv && prv.share != null && cur.share != null) ? (cur.share - prv.share)*100 : null;
+  // Avg sentiment of joined outlets, on -5..+5
+  const scores = outletList.map(o => {
+    const eff = effectiveScore(o.dealer, range);
+    return eff.score;
+  }).filter(s => s != null);
+  const avg = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : null;
+  const lo = scores.length ? Math.min(...scores) : null;
+  const hi = scores.length ? Math.max(...scores) : null;
+  return { cur, prv, sharePct, shareDeltaPp, avg, lo, hi, n: outletList.length };
+}
+function classifyQuadrant(stats) {
+  if (stats.avg == null) return 'no_data';
+  // "Share weak" = share dropped (if compare on) OR below SHARE_BAR_PCT
+  const shareWeak = stats.shareDeltaPp != null
+    ? (stats.shareDeltaPp < SHARE_DELTA_BAR || (stats.sharePct != null && stats.sharePct < SHARE_BAR_PCT))
+    : (stats.sharePct != null && stats.sharePct < SHARE_BAR_PCT);
+  const sentWeak = stats.avg < SENT_BAR;
+  if (sentWeak && shareWeak)  return 'internal';
+  if (sentWeak && !shareWeak) return 'lead';
+  if (!sentWeak && shareWeak) return 'competitor';
+  return 'healthy';
+}
+
+// Prior-period range builder for time-delta indicators
+function priorRange(range) {
+  if (compareMode === 'off') return null;
+  const fromIdx = range.fromY*12 + (range.fromM-1);
+  const toIdx   = range.toY*12 + (range.toM-1);
+  const span = toIdx - fromIdx + 1;
+  let pFrom, pTo;
+  if (compareMode === 'yoy') {
+    pFrom = fromIdx - 12; pTo = toIdx - 12;
+  } else {
+    pFrom = fromIdx - span; pTo = fromIdx - 1;
+  }
+  if (pFrom < 0) return null;
+  return { fromY: Math.floor(pFrom/12), fromM: (pFrom%12)+1,
+           toY:   Math.floor(pTo/12),   toM:   (pTo%12)+1 };
+}
+
+// Cities dropdown
+function populateCityList() {
+  const listEl = document.getElementById('dd-cities-list');
+  const search = document.getElementById('dd-cities-search').value.toLowerCase();
+  listEl.innerHTML = '';
+  CITIES.filter(c => !search || c.city.toLowerCase().includes(search))
+        .sort((a,b) => {
+          const ahd = a.dealer_indices.length>0?1:0, bhd = b.dealer_indices.length>0?1:0;
+          if (ahd !== bhd) return bhd - ahd;
+          if (a.marker_count !== b.marker_count) return b.marker_count - a.marker_count;
+          return a.city.localeCompare(b.city);
+        })
+        .forEach(c => {
+          const row = document.createElement('label');
+          row.className = 'dropdown-item';
+          const checked = selectedCities.has(c.city) ? 'checked' : '';
+          const sub = [];
+          if (c.rto_codes.length) sub.push(`${c.rto_codes.length}R`);
+          if (c.dealer_indices.length) sub.push(`${c.dealer_indices.length}O`);
+          row.innerHTML = `<input type="checkbox" ${checked} data-city="${c.city.replace(/"/g,'&quot;')}"><span>${c.city}</span><span class="sub">${sub.join(' · ')}</span>`;
+          row.querySelector('input').addEventListener('change', e => {
+            if (e.target.checked) selectedCities.add(c.city); else selectedCities.delete(c.city);
+            updateCityLabel();
+            populateDistrictList();
+            updateDistrictLabel();
+            render();
+          });
+          listEl.appendChild(row);
+        });
+}
+function updateCityLabel() {
+  const total=CITIES.length, sel=selectedCities.size;
+  document.getElementById('dd-cities-label').textContent =
+    sel === total ? `All (${total})` : (sel === 0 ? 'None' : `${sel} cities`);
+}
+
+// District dropdown (mirrors city dropdown pattern)
+function populateDistrictList() {
+  const listEl = document.getElementById('dd-districts-list');
+  const search = (document.getElementById('dd-districts-search').value || '').toLowerCase();
+  listEl.innerHTML = '';
+  // Show districts only for currently-selected cities (most useful default)
+  const inScope = new Set(DASHBOARD_DATA.dealers
+    .filter(d => selectedCities.has(d.city))
+    .map(d => d.district).filter(Boolean));
+  const list = ALL_DISTRICTS.filter(d => inScope.has(d) && (!search || d.toLowerCase().includes(search)));
+  list.forEach(d => {
+    const row = document.createElement('label');
+    row.className = 'dropdown-item';
+    const checked = selectedDistricts.has(d) ? 'checked' : '';
+    row.innerHTML = `<input type="checkbox" ${checked} data-district="${d.replace(/"/g,'&quot;')}"><span>${d}</span>`;
+    row.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) selectedDistricts.add(d); else selectedDistricts.delete(d);
+      updateDistrictLabel();
+      render();
+    });
+    listEl.appendChild(row);
+  });
+}
+function updateDistrictLabel() {
+  const inScope = new Set(DASHBOARD_DATA.dealers
+    .filter(d => selectedCities.has(d.city))
+    .map(d => d.district).filter(Boolean));
+  const total = inScope.size;
+  const sel = Array.from(selectedDistricts).filter(d => inScope.has(d)).length;
+  document.getElementById('dd-districts-label').textContent =
+    sel === total ? `All (${total})` : (sel === 0 ? 'None' : `${sel} districts`);
+}
+</script>
+<script id="js3">
+// ===== Map Init + Tile Layers =====
+const apFeature = AP_GEOJSON.features[0];
+const apGeom = apFeature.geometry;
+let minLat=90,maxLat=-90,minLng=180,maxLng=-180;
+apGeom.coordinates.forEach(poly => poly.forEach(ring => ring.forEach(([lng,lat]) => {
+  if(lat<minLat)minLat=lat; if(lat>maxLat)maxLat=lat;
+  if(lng<minLng)minLng=lng; if(lng>maxLng)maxLng=lng;
+})));
+const combinedBounds = L.latLngBounds([Math.min(minLat,15.5),Math.min(minLng,77.0)],[Math.max(maxLat,20.0),Math.max(maxLng,85.0)]);
+const paddedBounds = combinedBounds.pad(0.02);
+
+const map = L.map('map', {
+  center: combinedBounds.getCenter(), zoom: 7, zoomControl: false,
+  minZoom: 6, maxZoom: 18, maxBounds: paddedBounds, maxBoundsViscosity: 1.0,
+  worldCopyJump: false, inertia: false
+});
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+const tiles = {
+  'Streets':   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution:'&copy; CartoDB', bounds: paddedBounds, subdomains:'abcd' }),
+  'Terrain':   L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenTopoMap', bounds: paddedBounds }),
+  'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution:'&copy; Esri', bounds: paddedBounds }),
+  'Dark':      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution:'&copy; CartoDB', bounds: paddedBounds })
+};
+tiles['Streets'].addTo(map);
+let activeTile = 'Streets';
+
+const tileBtnContainer = document.getElementById('tile-btns');
+Object.keys(tiles).forEach(name => {
+  const btn = document.createElement('button');
+  btn.className = 'pill' + (name===activeTile ? ' active' : '');
+  btn.textContent = name;
+  btn.onclick = () => {
+    map.eachLayer(l => { if (l instanceof L.TileLayer) map.removeLayer(l); });
+    tiles[name].addTo(map);
+    maskLayer.bringToFront(); apOutline.bringToFront();
+    rtoLayer.bringToFront(); dealerLayer.bringToFront();
+    activeTile = name;
+    tileBtnContainer.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tile-current').textContent = name;
+  };
+  tileBtnContainer.appendChild(btn);
+});
+
+// Mask + outline
+const outer = [[-85,-180],[-85,180],[85,180],[85,-180]];
+const holes = apGeom.coordinates.map(poly => poly[0].map(([lng,lat]) => [lat,lng]));
+const maskLayer = L.polygon([outer, ...holes], { color:'transparent', fillColor:'#0b1220', fillOpacity:0.65, interactive:false, smoothFactor:0 }).addTo(map);
+const apOutline = L.geoJSON(apFeature, { style:{ color:'#3b82f6', weight:2, opacity:0.55, fill:false, dashArray:'6 4' }, interactive:false }).addTo(map);
+</script>
+<script id="js4">
+// ===== Icon Factories =====
+function zoomFactor() { const z=map.getZoom(); return Math.max(0.7, Math.min(2.2, 0.7 + (z-6)*0.18)); }
+const LABEL_MIN_ZOOM = 10;
+function updateLabelVisibility() {
+  const show = map.getZoom() >= LABEL_MIN_ZOOM;
+  document.querySelectorAll('.outlet-label').forEach(el => el.classList.toggle('outlet-label-hidden', !show));
+}
+
+function rtoIcon(color, sizePx) {
+  return L.divIcon({
+    className: 'rto-icon',
+    html: `<div style="width:${sizePx}px;height:${sizePx}px;background:${color};transform:rotate(45deg);border:1.5px solid rgba(255,255,255,0.85);border-radius:1px;box-shadow:0 0 0 1px rgba(0,0,0,0.35);"></div>`,
+    iconSize:[sizePx,sizePx], iconAnchor:[sizePx/2,sizePx/2]
+  });
+}
+
+function dealerIcon(scoreColor, sizePx, division) {
+  const emoji = ICON_EMOJI[division] || '📍';
+  const W = Math.round(sizePx), H = Math.round(sizePx * 1.34);
+  const cx = W/2, cy = W/2, outerR = W/2, innerR = Math.round(W*0.36);
+  const path = `M ${cx} 0 C ${(cx-outerR).toFixed(1)} 0 0 ${(outerR*0.46).toFixed(1)} 0 ${cy} C 0 ${(cy+outerR*0.78).toFixed(1)} ${cx} ${H} ${cx} ${H} C ${cx} ${H} ${W} ${(cy+outerR*0.78).toFixed(1)} ${W} ${cy} C ${W} ${(outerR*0.46).toFixed(1)} ${(cx+outerR).toFixed(1)} 0 ${cx} 0 Z`;
+  const emojiSize = Math.round(innerR*1.32);
+  const delaySeed = (hexToRgb(scoreColor).split(',').reduce((a,b)=>a+ +b,0)) % 3000;
+  const pulseSize = Math.round(innerR*2);
+  return L.divIcon({
+    className: '',
+    html: `<div class="map-pin-wrap" style="width:${W}px;height:${H}px;">
+      <div class="map-pin-pulse" style="--pulse-color:${scoreColor};width:${pulseSize}px;height:${pulseSize}px;top:${cy-innerR}px;left:${cx-innerR}px;animation-delay:${delaySeed}ms;"></div>
+      <svg class="map-pin-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+        <path d="${path}" fill="${scoreColor}" stroke="rgba(0,0,0,0.20)" stroke-width="0.8" stroke-linejoin="round"/>
+        <circle cx="${cx}" cy="${cy}" r="${innerR}" fill="#fff" stroke="rgba(0,0,0,0.08)" stroke-width="0.6"/>
+      </svg>
+      <div class="map-pin-emoji" style="width:${innerR*2}px;height:${innerR*2}px;top:${cy-innerR}px;left:${cx-innerR}px;font-size:${emojiSize}px;">${emoji}</div>
+    </div>`,
+    iconSize:[W,H], iconAnchor:[cx,H]
+  });
+}
+
+// Layer groups
+const rtoLayer = L.layerGroup().addTo(map);
+const dealerLayer = L.layerGroup().addTo(map);
+let heatLayer = null;
+</script>
+<script id="js5">
+// ===== Create markers (once) =====
+const rtoMarkers = [];
+DASHBOARD_DATA.rtos.forEach(r => {
+  const m = L.marker([r.lat,r.lng], { icon: rtoIcon('#64748b',10) }).addTo(rtoLayer);
+  m.bindTooltip('', { className:'custom-tooltip', direction:'top', offset:[0,-8] });
+  m.bindPopup('', { maxWidth: 600, className: 'popup-rto-wrap', autoPan: false });
+  rtoMarkers.push({ marker:m, data:r });
+});
+
+const dealerMarkers = [];
+DASHBOARD_DATA.dealers.forEach(d => {
+  const m = L.marker([d.lat,d.lng], { icon: dealerIcon('#64748b',16,d.division) }).addTo(dealerLayer);
+  m.bindTooltip(d.short_name, { permanent:true, direction:'right', offset:[4,-16], className:'outlet-label' });
+  m.bindPopup('', { maxWidth: 980, className: 'popup-wide-wrap', autoPan: false });
+  dealerMarkers.push({ marker:m, data:d });
+});
+
+map.fitBounds(combinedBounds, { padding:[20,20] });
+map.on('zoomend', () => { render(); updateLabelVisibility(); });
+
+// ===== Heatmap (sentiment-weighted) =====
+function buildHeatPoints() {
+  // Each outlet contributes a point with intensity proportional to sentiment.
+  // Color comes from gradient based on sentiment (red→green)
+  const pts = [];
+  DASHBOARD_DATA.dealers.forEach((d, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    if (!selectedCities.has(cityOf)) return;
+    if (!selectedDivisions.has(d.division)) return;
+    if (d.district && !selectedDistricts.has(d.district)) return;
+    if (!dealerMatchesCategory(d)) return;
+    // Prefer ABSA overall, then sentiment_score (both stored on 0-10 scale)
+    const s10 = (d.absa_overall != null) ? d.absa_overall : d.sentiment_score;
+    if (s10 == null) return;
+    // Normalize 0-10 to 0-1 intensity
+    const intensity = Math.max(0.05, s10/10);
+    pts.push([d.lat, d.lng, intensity]);
+  });
+  return pts;
+}
+function toggleHeatmap(on) {
+  if (on) {
+    const pts = buildHeatPoints();
+    if (heatLayer) map.removeLayer(heatLayer);
+    heatLayer = L.heatLayer(pts, {
+      radius: 35, blur: 25, maxZoom: 13, max: 1.0,
+      gradient: { 0.1: '#ef4444', 0.4: '#f97316', 0.55: '#eab308', 0.7: '#84cc16', 0.9: '#16a34a' }
+    }).addTo(map);
+  } else if (heatLayer) {
+    map.removeLayer(heatLayer); heatLayer = null;
+  }
+}
+</script>
+<script id="js6">
+// ===== Main Render Loop =====
+function getRange() { return PRESETS[activePreset](); }
+
+// Effective sentiment for a dealer in the current range — Pulse Score (−5..+5).
+// Pulse = confidence-weighted blend of star-rating sentiment and ABSA-mention sentiment.
+// Both signals are mapped to −5..+5 and weighted by sample size so a large star sample
+// dominates a noisy 3-item ABSA blip.
+//
+// Rationale: ABSA pipeline drops short positive reviews like "Good place" / "Excellent
+// staff" as L1-noise. Outlets with many such short positives + few long negatives end up
+// with badly skewed ABSA scores. Star ratings capture the full review distribution and
+// rebalance.
+function effectiveScore(d, range) {
+  const s = sumRangeDealer(d, range.fromY, range.fromM, range.toY, range.toM);
+
+  // ---- In-range signals ----
+  const n_stars = s.rated;
+  const star_score = n_stars > 0 ? ((s.positive / n_stars) * 2 - 1) * 5 : null;
+
+  let n_absa = 0, abs_pos = 0, abs_neg = 0;
+  (d.absa_reviews || []).forEach(r => {
+    if (!dateInRange(r.date, range)) return;
+    (r.items || []).forEach(it => {
+      if (it.sentiment === 'positive') { abs_pos++; n_absa++; }
+      else if (it.sentiment === 'negative') { abs_neg++; n_absa++; }
+    });
+  });
+  const absa_score = n_absa > 0 ? ((abs_pos / n_absa) * 2 - 1) * 5 : null;
+
+  // Blend in-range
+  if (star_score != null && absa_score != null) {
+    const score = (n_stars * star_score + n_absa * absa_score) / (n_stars + n_absa);
+    return { score, source: 'hybrid', isAllTime: false, sample: s, n_stars, n_absa, star_score, absa_score };
+  }
+  if (star_score != null) return { score: star_score, source: 'stars', isAllTime: false, sample: s, n_stars, n_absa: 0, star_score, absa_score: null };
+  if (absa_score != null) return { score: absa_score, source: 'absa',  isAllTime: false, sample: s, n_stars: 0, n_absa, star_score: null, absa_score };
+
+  // ---- No in-range data — fall back to all-time ----
+  const dist_all = d.rating_dist_total || [0,0,0,0,0];
+  const star_n_all = dist_all.reduce((a,b)=>a+b,0);
+  const pos_all_stars = dist_all[3] + dist_all[4];
+  const star_all = star_n_all > 0 ? ((pos_all_stars / star_n_all) * 2 - 1) * 5 : null;
+
+  const apos = d.absa_mentions_pos || 0, aneg = d.absa_mentions_neg || 0;
+  const absa_n_all = apos + aneg;
+  const absa_all = absa_n_all > 0 ? ((apos / absa_n_all) * 2 - 1) * 5 : null;
+
+  if (star_all != null && absa_all != null) {
+    const score = (star_n_all * star_all + absa_n_all * absa_all) / (star_n_all + absa_n_all);
+    return { score, source: 'hybrid-all', isAllTime: true, sample: s, n_stars: star_n_all, n_absa: absa_n_all, star_score: star_all, absa_score: absa_all };
+  }
+  if (star_all != null) return { score: star_all, source: 'stars-all', isAllTime: true, sample: s, n_stars: star_n_all, n_absa: 0, star_score: star_all, absa_score: null };
+  if (absa_all != null) return { score: absa_all, source: 'absa-all',  isAllTime: true, sample: s, n_stars: 0, n_absa: absa_n_all, star_score: null, absa_score: absa_all };
+
+  return { score: null, source: null, isAllTime: false, sample: s, n_stars: 0, n_absa: 0, star_score: null, absa_score: null };
+}
+
+// Does this dealer have any ABSA mentions matching the selected categories?
+// Empty set = no category filter (all categories pass).
+function dealerMatchesCategory(d) {
+  if (selectedCategories.size === 0) return true;
+  const cats = d.absa_categories || {};
+  for (const k of selectedCategories) {
+    const v = cats[k];
+    if (v && (v.pos + v.neg) > 0) return true;
+  }
+  return false;
+}
+
+function render() {
+  const range = getRange();
+  const prior = priorRange(range);
+  document.getElementById('range-summary').textContent =
+    range.label + (prior ? ` · vs ${MONTHS[prior.fromM-1]} ${prior.fromY}–${MONTHS[prior.toM-1]} ${prior.toY}` : '');
+  const zf = zoomFactor();
+
+  // ---- Compute the visible-outlet set FIRST (needed for spatial join used in RTO coloring) ----
+  const visibleDealers = [];
+  DASHBOARD_DATA.dealers.forEach((d, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    const divOk = selectedDivisions.has(d.division);
+    const cityOk = cityOf && selectedCities.has(cityOf);
+    const distOk = !d.district || selectedDistricts.has(d.district);
+    const catOk = dealerMatchesCategory(d);
+    const dataOk = !dataOnlyMode || outletHasData(d);
+    if (cityOk && divOk && distOk && catOk && dataOk) visibleDealers.push(i);
+  });
+  // Spatial join (only when cross-signal mode is active to avoid wasted work)
+  const rtoJoin = rtoColorMode === 'cross' ? joinOutletsToRTOs(visibleDealers, range) : {};
+  // RTO visibility piggybacks on outlet filters: an RTO is shown only if at least
+  // one visible outlet shares its city. This way District/Type/Category filters
+  // (which don't apply directly to RTO data) still narrow the RTO view.
+  const citiesWithVisibleOutlet = new Set(visibleDealers.map(i => DEALER_TO_CITY[i]));
+
+  // ---- RTOs ----
+  let totalCars=0, totalMaruti=0, rtoWithData=0;
+  const rtoVolumes = DASHBOARD_DATA.rtos.map(r => sumRangeRTO(r, range.fromY,range.fromM,range.toY,range.toM).cars);
+  const maxVol = Math.max(1, ...rtoVolumes);
+  rtoMarkers.forEach(({marker,data}) => {
+    const cityOf = RTO_TO_CITY[data.code];
+    const cityOk = cityOf && selectedCities.has(cityOf);
+    const dataOk = !dataOnlyMode || rtoHasDataInRange(data, range);
+    // If the user has narrowed outlets to a subset (district/type/category),
+    // only show RTOs in cities that still have at least one matching outlet.
+    // Exception: if outlet filters haven't excluded everyone in that city, OR
+    // if NO outlets are visible anywhere (e.g. user unchecked the Outlets layer),
+    // fall back to city-level visibility so RTOs stay independent.
+    const outletNarrowed = visibleDealers.length > 0 && visibleDealers.length < DASHBOARD_DATA.dealers.length;
+    const outletLinkOk = !outletNarrowed || citiesWithVisibleOutlet.has(cityOf);
+    const visible = cityOk && dataOk && outletLinkOk;
+    if (!visible) { if (rtoLayer.hasLayer(marker)) rtoLayer.removeLayer(marker); return; }
+    if (!rtoLayer.hasLayer(marker)) marker.addTo(rtoLayer);
+    const s = sumRangeRTO(data, range.fromY,range.fromM,range.toY,range.toM);
+    const hasData = s.cars > 0;
+    let color, sharePct;
+    if (rtoColorMode === 'cross') {
+      const joined = rtoJoin[data.code] || [];
+      const stats = rtoCrossStats(data, joined, range, prior);
+      const q = classifyQuadrant(stats);
+      color = CROSS_COLORS[q];
+      sharePct = hasData ? s.share*100 : null;
+    } else {
+      color = hasData ? shareColor(s.share*100) : '#475569';
+      sharePct = hasData ? s.share*100 : null;
+    }
+    const baseSize = hasData ? 8 + 14*Math.sqrt(s.cars/maxVol) : 8;
+    if (hasData) { totalCars+=s.cars; totalMaruti+=s.maruti; rtoWithData++; }
+    // Time-delta vs prior period
+    let deltaPct = null;
+    if (prior && hasData) {
+      const sp = sumRangeRTO(data, prior.fromY,prior.fromM,prior.toY,prior.toM);
+      if (sp.share != null) deltaPct = (s.share - sp.share) * 100;
+    }
+    marker.setIcon(rtoIcon(color, Math.round(baseSize*zf)));
+    marker.setTooltipContent(`<div style="font-weight:700;margin-bottom:2px;">${data.code} · ${data.city}</div>
+      <div style="color:#94a3b8;font-size:0.7rem;margin-bottom:4px;">RTO · ${data.state==='AP'?'AP':'TG'}</div>
+      <div>Maruti: <b style="color:${color}">${sharePct!=null?sharePct.toFixed(1)+'%':'no data'}</b>${deltaPct!=null?` <span style="color:${deltaPct>=0?'#4ade80':'#f87171'};font-size:0.72rem;">(${deltaPct>=0?'+':''}${deltaPct.toFixed(1)} pp)</span>`:''}</div>
+      <div>Cars: ${fmtNum(s.cars)} · Maruti: ${fmtNum(s.maruti)}</div>`);
+    marker.setPopupContent(`<div class="popup-content"><h3>${data.code} · ${data.city}</h3>
+      <div class="sub">RTO · ${data.state==='AP'?'Andhra Pradesh':'Telangana'} · ${range.label}</div>
+      ${hasData ? `<div style="font-size:1.4rem;font-weight:700;color:${color};">${sharePct.toFixed(1)}%${deltaPct!=null?` <span style="font-size:0.72rem;color:${deltaPct>=0?'#4ade80':'#f87171'};font-weight:500;">${deltaPct>=0?'▲ +':'▼ '}${Math.abs(deltaPct).toFixed(1)} pp</span>`:''}</div>
+        <div style="font-size:0.75rem;color:#94a3b8;">Maruti share of passenger cars</div>
+        <div class="popup-divider"></div>
+        <table style="width:100%;font-size:0.8rem;"><tr><td>Cars</td><td style="text-align:right;font-weight:600;">${s.cars.toLocaleString()}</td></tr>
+        <tr><td>Maruti</td><td style="text-align:right;font-weight:600;">${s.maruti.toLocaleString()}</td></tr></table>` : `<div style="color:#94a3b8;font-size:0.85rem;">No registrations in this range.</div>`}
+      ${buildRtoTrendBlock(data)}
+      </div>`);
+  });
+
+  // ---- Outlets ----
+  // Percentile ranking among visible outlets that have a score
+  const scoredDealers = visibleDealers
+    .map(i => ({ i, sc: effectiveScore(DASHBOARD_DATA.dealers[i], range).score }))
+    .filter(x => x.sc != null)
+    .sort((a,b) => a.sc - b.sc);
+  const rankByIdx = new Map();
+  scoredDealers.forEach((x, k) => rankByIdx.set(x.i, { rank: k+1, total: scoredDealers.length }));
+
+  let outletsVisible = 0;
+  const reviewCounts = DASHBOARD_DATA.dealers.map(d => sumRangeDealer(d, range.fromY,range.fromM,range.toY,range.toM).count);
+  const maxReviews = Math.max(1, ...reviewCounts);
+  dealerMarkers.forEach(({marker,data}, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    const divOk = selectedDivisions.has(data.division);
+    const cityOk = cityOf && selectedCities.has(cityOf);
+    const distOk = !data.district || selectedDistricts.has(data.district);
+    const catOk = dealerMatchesCategory(data);
+    const dataOk = !dataOnlyMode || outletHasData(data);
+    const visible = cityOk && divOk && distOk && catOk && dataOk;
+    if (!visible) { if (dealerLayer.hasLayer(marker)) dealerLayer.removeLayer(marker); return; }
+    if (!dealerLayer.hasLayer(marker)) marker.addTo(dealerLayer);
+    outletsVisible++;
+    const eff = effectiveScore(data, range);
+    const score = eff.score;
+    const color = scoreColor10(score);
+    // Size: log of review count (so single-review outlets aren't tiny)
+    const rk = rankByIdx.get(i);
+    const sizeBoost = rk ? (1 - (rk.rank-1)/Math.max(1, rk.total-1)) : 0; // 1=best, 0=worst
+    const baseSize = 14 + 6*Math.sqrt((eff.sample.count + 1)/(maxReviews + 1)) + 3*sizeBoost;
+    marker.setIcon(dealerIcon(color, Math.round(baseSize*zf), data.division));
+    // Compute time-delta for the popup — Pulse Score in current range minus Pulse Score in prior.
+    let deltaScore = null;
+    if (prior) {
+      const priorEff = effectiveScore(data, prior);
+      if (priorEff.score != null && !priorEff.isAllTime && score != null) {
+        deltaScore = score - priorEff.score;
+      }
+    }
+    marker.setPopupContent(
+      popupViewState[i]
+        ? buildReviewsPopupContent(i, range)
+        : buildDealerPopup(data, eff.sample, score, color, range, rk, deltaScore, i, eff)
+    );
+  });
+
+  document.getElementById('nav-outlets').textContent = outletsVisible;
+  document.getElementById('nav-rtos').textContent = rtoWithData;
+  document.getElementById('nav-cities').textContent = selectedCities.size;
+
+  if (layerState.heatmap) toggleHeatmap(true);
+  updateLabelVisibility();
+  renderAnalytics();
+}
+</script>
+<script id="js7">
+// ===== Dealer Popup Builder =====
+const CAT_ALL = ['staff','service_quality','communication','delivery','ambiance','pricing','wait_time','followup','cleanliness','other'];
+
+function buildDealerPopup(data, s, score, color, range, rk, deltaScore, dealerIdx, eff) {
+  const dist = s.rated > 0 ? s.dist : (data.rating_dist_total || [0,0,0,0,0]);
+  const total = dist.reduce((a,b)=>a+b,0);
+  const distRows = dist.map((n,i) => {
+    const star = i+1, pct = total>0 ? (n/total*100) : 0;
+    const c = star>=4 ? '#22c55e' : (star===3 ? '#eab308' : '#ef4444');
+    const w = total > 0 ? (n/Math.max(...dist))*100 : 0;
+    return `<div style="display:flex;align-items:center;gap:6px;font-size:0.74rem;margin:2px 0;">
+      <span style="width:22px;color:#94a3b8;">${star}★</span>
+      <div style="flex:1;height:7px;background:#334155;border-radius:2px;overflow:hidden;">
+        <div style="width:${w}%;height:100%;background:${c};"></div></div>
+      <span style="width:32px;text-align:right;color:#cbd5e1;">${n}</span></div>`;
+  }).join('');
+
+  // Build split category lists — time-filtered so the counts match the drilldown.
+  // Categories with 0 in-range mentions don't render (and therefore aren't clickable),
+  // which prevents the user from drilling into an empty review list.
+  const cats = {};
+  (data.absa_reviews || []).forEach(r => {
+    if (!dateInRange(r.date, range)) return;
+    (r.items || []).forEach(it => {
+      if (!cats[it.category]) cats[it.category] = { pos: 0, neg: 0 };
+      if (it.sentiment === 'positive') cats[it.category].pos++;
+      else if (it.sentiment === 'negative') cats[it.category].neg++;
+    });
+  });
+  const totalReviews = (data.absa_reviews || []).filter(r => dateInRange(r.date, range)).length;
+  const negRows = CAT_ALL.map(k => {
+    const v = cats[k]; const n = v ? v.neg : 0;
+    if (!n) return '';
+    return `<div class="cat-row" data-place="${dealerIdx}" data-cat="${k}" data-sent="negative">
+      <span class="cat-name">${CAT_LABEL[k]||k}</span><span class="cat-count">${n}</span></div>`;
+  }).filter(Boolean).join('') || '<div class="cat-row empty">No focus areas this period</div>';
+  const posRows = CAT_ALL.map(k => {
+    const v = cats[k]; const n = v ? v.pos : 0;
+    if (!n) return '';
+    return `<div class="cat-row" data-place="${dealerIdx}" data-cat="${k}" data-sent="positive">
+      <span class="cat-name">${CAT_LABEL[k]||k}</span><span class="cat-count">${n}</span></div>`;
+  }).filter(Boolean).join('') || '<div class="cat-row empty">No strengths captured</div>';
+
+  const scoreTxt = fmtScore5(score);
+  let deltaHtml = '';
+  if (deltaScore != null) {
+    const d = fmtDelta(deltaScore);
+    deltaHtml = `<span class="score-delta ${d.cls}">${d.txt}</span>`;
+  }
+
+  let rankHtml = '';
+  if (rk) {
+    const top3 = rk.rank > rk.total - 3, bot3 = rk.rank <= 3;
+    const tag = top3 ? `Top ${rk.total - rk.rank + 1} of ${rk.total} in selection` :
+                bot3 ? `Bottom ${rk.rank} of ${rk.total} in selection` :
+                       `Ranked ${rk.total - rk.rank + 1} of ${rk.total} in selection`;
+    rankHtml = `<div style="font-size:0.68rem;color:#94a3b8;margin-top:2px;">${tag}</div>`;
+  }
+
+  // Top mentions split
+  const mentions = data.absa_top_mentions || [];
+  const mPos = mentions.filter(m => m.sentiment === 'positive').slice(0, 3);
+  const mNeg = mentions.filter(m => m.sentiment === 'negative').slice(0, 3);
+
+  // Entity-level breakdown — aggregate items in absa_reviews by entity name.
+  // Time-filtered to match the popup's category counts.
+  const entAgg = {};
+  (data.absa_reviews || []).forEach(r => {
+    if (!dateInRange(r.date, range)) return;
+    (r.items || []).forEach(it => {
+      const name = (it.entity || '').trim();
+      if (!name) return;
+      const k = name.toLowerCase();
+      if (!entAgg[k]) entAgg[k] = { name, pos: 0, neg: 0, type: it.entity_type || '' };
+      if (it.sentiment === 'positive') entAgg[k].pos++;
+      else if (it.sentiment === 'negative') entAgg[k].neg++;
+    });
+  });
+  const entRows = Object.values(entAgg)
+    .filter(e => (e.pos + e.neg) >= 1)
+    .sort((a,b) => (b.pos + b.neg) - (a.pos + a.neg))
+    .slice(0, 8)
+    .map(e => {
+      const total = e.pos + e.neg;
+      const sc = (e.pos - e.neg) / total * 5;
+      const c = scoreColor10(sc);
+      const posPct = (e.pos/total)*100;
+      const escName = e.name.replace(/"/g, '&quot;');
+      return `<div class="ent-row" data-place="${dealerIdx}" data-entity="${escName}" title="Click to read reviews mentioning ${escName}">
+        <span class="ent-name">${e.name}${e.type?` <span style="color:#64748b;font-size:0.62rem;">· ${e.type}</span>`:''}</span>
+        <div class="ent-bar"><div style="width:${posPct}%;height:100%;background:#22c55e;"></div></div>
+        <span class="ent-count" style="color:${c};">${e.pos}↑/${e.neg}↓</span>
+      </div>`;
+    }).join('');
+
+  // Pre-build the small fragments so the final return is just composition
+  const gmapBoxHtml = (() => {
+    const gr = data.gmaps_rating, gn = data.gmaps_total_reviews;
+    const isPlaceholder = data.gmaps_meta_source === 'placeholder';
+    const stars = gr != null ? '★'.repeat(Math.round(gr)) + '☆'.repeat(5 - Math.round(gr)) : '';
+    const inRangeCount = s.count || 0;
+    const inRangeAvg = s.rated > 0
+      ? ((1*s.dist[0] + 2*s.dist[1] + 3*s.dist[2] + 4*s.dist[3] + 5*s.dist[4]) / s.rated)
+      : null;
+    const placeholderTag = isPlaceholder
+      ? '<span style="font-size:0.6rem;color:#fbbf24;background:rgba(251,191,36,0.12);padding:1px 5px;border-radius:3px;margin-left:4px;" title="Auto-generated placeholder. Edit data/outlet_gmap_meta.csv.">unverified</span>'
+      : '';
+    return `
+      <div class="gmap-box">
+        <div class="gmap-row">
+          <span class="gmap-stars">${stars}</span>
+          <span class="gmap-rating">${gr != null ? gr.toFixed(1) : '–'}</span>
+          <span class="gmap-meta">on Google · ${gn != null ? gn.toLocaleString() : '?'} reviews</span>
+          ${placeholderTag}
+        </div>
+        <div class="gmap-row gmap-row-sub">
+          <span class="gmap-stars" style="color:#64748b;">${inRangeAvg != null ? '★'.repeat(Math.round(inRangeAvg)) + '☆'.repeat(5 - Math.round(inRangeAvg)) : '☆☆☆☆☆'}</span>
+          <span class="gmap-rating" style="color:#cbd5e1;">${inRangeAvg != null ? inRangeAvg.toFixed(1) : '–'}</span>
+          <span class="gmap-meta">in ${range.label} · ${inRangeCount.toLocaleString()} review${inRangeCount===1?'':'s'} captured</span>
+        </div>
+      </div>`;
+  })();
+
+  const pulseBlockHtml = score != null
+    ? `<div style="display:flex;align-items:center;gap:10px;margin:4px 0 8px;">
+        <div style="font-size:1.7rem;font-weight:700;color:${color};line-height:1;">${scoreTxt}<span style="font-size:0.78rem;color:#94a3b8;font-weight:500;"> / ±5</span></div>
+        <div style="font-size:0.68rem;color:#94a3b8;line-height:1.3;">Pulse Score${eff && eff.isAllTime ? ' <span style="color:#fbbf24;font-size:0.62rem;">· all-time fallback</span>' : ''}${deltaHtml}${rankHtml}</div>
+      </div>`
+    : '<div style="color:#94a3b8;font-size:0.8rem;margin:6px 0;">No reviews yet.</div>';
+
+  const ratingDistHtml = total > 0
+    ? `<div class="section-label">Rating Distribution</div>${distRows}`
+    : '';
+
+  const focusStrengthsHtml = (Object.keys(cats).length || totalReviews)
+    ? `<div class="section-label">Focus areas &amp; strengths <span style="color:#64748b;font-weight:400;">· click any tag to see the customer reviews</span></div>
+       <div class="popup-grid">
+         <div class="popup-col neg"><div class="col-head">Focus areas</div>${negRows}</div>
+         <div class="popup-col pos"><div class="col-head">Strengths</div>${posRows}</div>
+       </div>`
+    : '';
+
+  const topCalloutsHtml = (mPos.length || mNeg.length)
+    ? `<div class="section-label">Top Callouts</div>
+       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+         <div>${mNeg.map(m => `<div style="font-size:0.7rem;color:#cbd5e1;border-left:2px solid #ef4444;padding:2px 6px;margin:2px 0;">${m.text}</div>`).join('')}</div>
+         <div>${mPos.map(m => `<div style="font-size:0.7rem;color:#cbd5e1;border-left:2px solid #22c55e;padding:2px 6px;margin:2px 0;">${m.text}</div>`).join('')}</div>
+       </div>`
+    : '';
+
+  const entitySectionHtml = entRows
+    ? `<div class="section-label">People &amp; places mentioned <span style="color:#64748b;font-weight:400;">· ↑ positives vs ↓ focus · click any row to read reviews</span></div>${entRows}`
+    : '';
+
+  // Mini-map "magnifying lens" — DISABLED (commented out per user request).
+  // To re-enable: restore the lensHtml block below and the .popup-top-right
+  // cell in the popup template, plus the popupopen hook in js7b.
+  // const lensHtml = `
+  //   <div class="minimap-wrap">
+  //     <div class="minimap-canvas" id="minimap-${dealerIdx}"></div>
+  //     <div class="minimap-legend">⌖ this outlet · hover/click any pin</div>
+  //   </div>`;
+
+  return `<div class="popup-content">
+    <h3>${data.short_name}</h3>
+    <div class="sub">${DIV_LABEL[data.division]} · ${data.city}${data.district && data.district !== data.city ? ' · ' + data.district : ''} · ${range.label}</div>
+    ${data.address ? `<div style="font-size:0.7rem;color:#94a3b8;margin:4px 0;">${data.address}</div>` : ''}
+    ${gmapBoxHtml}
+    <div class="popup-grid-main">
+      <div>
+        ${pulseBlockHtml}
+        ${ratingDistHtml}
+      </div>
+      <div>
+        ${focusStrengthsHtml}
+      </div>
+    </div>
+    ${(topCalloutsHtml || entitySectionHtml) ? `<div class="popup-divider"></div>
+    <div class="popup-grid-main">
+      <div>${topCalloutsHtml}</div>
+      <div>${entitySectionHtml}</div>
+    </div>` : ''}
+    ${data.gmap_url ? `<div style="margin-top:10px;font-size:0.72rem;"><a href="${data.gmap_url}" target="_blank" style="color:#3b82f6;">Open in Google Maps ↗</a></div>` : ''}
+  </div>`;
+}
+</script>
+<script id="js7b">
+// ===== RTO trend chart inside popups =====
+// State per RTO so re-opening the popup remembers the user's last view mode.
+const rtoChartState = {};   // { [rtoCode]: { mode: 'yearly'|'monthly', year: int } }
+let rtoTrendChart = null;   // single shared instance — only one RTO popup is open at a time
+
+function rtoYearsWithData(rto) {
+  return Object.keys(rto.years || {})
+    .filter(y => (rto.years[y].cars || []).reduce((a,b) => a+(b||0), 0) > 0)
+    .sort();
+}
+function rtoMostRecentYear(rto) {
+  const ys = rtoYearsWithData(rto);
+  return ys.length ? Number(ys[ys.length-1]) : DEFAULT_YEAR;
+}
+
+function buildRtoTrendBlock(rto) {
+  const ys = rtoYearsWithData(rto);
+  if (ys.length === 0) return '';
+  const state = rtoChartState[rto.code] = rtoChartState[rto.code] || { mode: 'yearly', year: rtoMostRecentYear(rto) };
+  const yearOpts = ys.map(y => `<option value="${y}" ${Number(y)===state.year?'selected':''}>${y}</option>`).join('');
+  return `
+    <div class="popup-divider"></div>
+    <div class="rto-chart-block">
+      <div class="rto-chart-controls">
+        <span style="font-size:0.62rem;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;">Trend</span>
+        <div class="dd-pill-row">
+          <button class="pill ${state.mode==='yearly'?'active':''}" data-rto-code="${rto.code}" data-rto-mode="yearly">Yearly</button>
+          <button class="pill ${state.mode==='monthly'?'active':''}" data-rto-code="${rto.code}" data-rto-mode="monthly">Monthly</button>
+        </div>
+        <select class="rto-year-select" data-rto-code="${rto.code}" style="${state.mode==='monthly'?'':'display:none;'}">${yearOpts}</select>
+      </div>
+      <canvas id="rto-trend-${rto.code}"></canvas>
+    </div>`;
+}
+
+function getRtoTrendData(rto, mode, year) {
+  if (mode === 'yearly') {
+    const labels = rtoYearsWithData(rto);
+    const cars = labels.map(y => (rto.years[y].cars || []).reduce((a,b) => a+(b||0), 0));
+    const shares = labels.map(y => {
+      const c = (rto.years[y].cars || []).reduce((a,b) => a+(b||0), 0);
+      const m = (rto.years[y].maruti || []).reduce((a,b) => a+(b||0), 0);
+      return c > 0 ? +(m/c*100).toFixed(2) : null;
+    });
+    return { labels, cars, shares };
+  } else {
+    const yd = rto.years[String(year)];
+    if (!yd) return { labels: [], cars: [], shares: [] };
+    const cars = yd.cars || [];
+    const maruti = yd.maruti || [];
+    return {
+      labels: MONTHS,
+      cars: cars,
+      shares: cars.map((c, i) => c > 0 ? +(maruti[i]/c*100).toFixed(2) : null),
+    };
+  }
+}
+
+function drawRtoTrendChart(rto) {
+  const canvas = document.getElementById(`rto-trend-${rto.code}`);
+  if (!canvas) return;
+  const state = rtoChartState[rto.code];
+  const data = getRtoTrendData(rto, state.mode, state.year);
+  if (rtoTrendChart) { try { rtoTrendChart.destroy(); } catch(e) {} rtoTrendChart = null; }
+  rtoTrendChart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: data.labels,
+      datasets: [
+        { type: 'bar', label: 'Cars', data: data.cars,
+          backgroundColor: 'rgba(100,116,139,0.45)', borderColor: '#64748b',
+          yAxisID: 'y1', borderRadius: 2, order: 2 },
+        { type: 'line', label: 'Maruti share %', data: data.shares,
+          borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.18)',
+          yAxisID: 'y2', tension: 0.3, fill: true, spanGaps: true, pointRadius: 3, order: 1 },
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { labels: { font: { size: 9 }, boxWidth: 8 } },
+                 tooltip: { backgroundColor: '#1e293b', borderColor: '#475569', borderWidth: 1 } },
+      scales: {
+        y1: { position: 'left',  beginAtZero: true, grid: { color: '#334155' }, ticks: { font: { size: 9 } },
+              title: { display: true, text: 'Cars', color: '#94a3b8', font: { size: 9 } } },
+        y2: { position: 'right', min: 0, max: 80, grid: { display: false },
+              ticks: { callback: v => v+'%', font: { size: 9 } },
+              title: { display: true, text: 'Maruti share', color: '#94a3b8', font: { size: 9 } } },
+        x:  { grid: { display: false }, ticks: { font: { size: 9 } } }
+      }
+    }
+  });
+}
+
+// Hook into leaflet popupopen — if the opened popup belongs to an RTO, init the chart.
+// Use rAF chain + resize to ensure the canvas has real dimensions before Chart.js measures.
+function initRtoChartWhenReady(rto, attempts = 12) {
+  if (attempts <= 0) return;
+  requestAnimationFrame(() => {
+    const canvas = document.getElementById(`rto-trend-${rto.code}`);
+    if (canvas && canvas.offsetWidth > 0 && canvas.offsetHeight > 0) {
+      drawRtoTrendChart(rto);
+      // Belt-and-braces: force a resize on the next frame in case popup autoPan is still settling
+      requestAnimationFrame(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch(e) {} });
+    } else {
+      initRtoChartWhenReady(rto, attempts - 1);
+    }
+  });
+}
+
+map.on('popupopen', (ev) => {
+  const found = rtoMarkers.find(x => x.marker === ev.layer);
+  if (!found) return;
+  initRtoChartWhenReady(found.data);
+});
+
+// ===== Mini-map "magnifying lens" inside the dealer popup =====
+let miniMap = null;
+let miniMapState = null;          // { dealerIdx, neighborsAll: [{i,lat,lng,d,...}], pinLayers: Map<i, marker> }
+// Configurable radii (in screen pixels at the lens map's current view)
+const MINI_LENS_PX = 50;          // initial capture radius around center outlet
+const MINI_HOVER_NEIGHBOR_PX = 100; // when hovering a pin, if neighbors are within this px, zoom in until they're not
+const MINI_BASE_ZOOM = 13;        // starting zoom (~city block resolution)
+const MINI_MAX_ZOOM = 17;
+
+function initMiniMapWhenReady(dealerIdx, attempts = 12) {
+  if (attempts <= 0) return;
+  requestAnimationFrame(() => {
+    const el = document.getElementById(`minimap-${dealerIdx}`);
+    if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+      buildMiniMap(dealerIdx, el);
+    } else {
+      initMiniMapWhenReady(dealerIdx, attempts - 1);
+    }
+  });
+}
+
+function tearDownMiniMap() {
+  if (miniMap) { try { miniMap.remove(); } catch(e) {} miniMap = null; }
+  miniMapState = null;
+}
+
+function buildMiniMap(dealerIdx, el) {
+  tearDownMiniMap();
+  const center = DASHBOARD_DATA.dealers[dealerIdx];
+  if (!center) return;
+  const range = getRange();
+  const mm = L.map(el, {
+    center: [center.lat, center.lng],
+    zoom: MINI_BASE_ZOOM,
+    minZoom: 9,
+    maxZoom: MINI_MAX_ZOOM,
+    zoomControl: false,
+    attributionControl: false,
+    scrollWheelZoom: true,
+    dragging: true,
+    keyboard: false,
+  });
+  // Light tiles so it's clearly visible inside a dark popup (the prior dark
+  // tile layer disappeared into the popup background, hence "black screen")
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/voyager/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 19,
+  }).addTo(mm);
+
+  // Yellow ring on THIS outlet — instantly identifiable
+  const ringIcon = L.divIcon({
+    className: '', html: '<div class="minimap-center-ring"></div>',
+    iconSize: [14,14], iconAnchor: [7,7]
+  });
+  L.marker([center.lat, center.lng], { icon: ringIcon, interactive: false, zIndexOffset: 1000 }).addTo(mm);
+
+  // After tiles settle, decide which outlets fall within MINI_LENS_PX of center
+  // (measured in screen pixels at the current view). Drop pins for those.
+  const placePins = () => {
+    const centerPt = mm.latLngToContainerPoint([center.lat, center.lng]);
+    const pinLayers = new Map();
+    const neighborsAll = [];
+    DASHBOARD_DATA.dealers.forEach((d, i) => {
+      if (i === dealerIdx) return;
+      const pt = mm.latLngToContainerPoint([d.lat, d.lng]);
+      const dx = pt.x - centerPt.x, dy = pt.y - centerPt.y;
+      const px = Math.sqrt(dx*dx + dy*dy);
+      if (px > MINI_LENS_PX) return;
+      const eff = effectiveScore(d, range);
+      const color = eff.score != null ? scoreColor10(eff.score) : '#64748b';
+      const emoji = ICON_EMOJI[d.division] || '📍';
+      const scTxt = eff.score != null ? fmtScore5(eff.score) : '–';
+      const kmFromCenter = haversineKm([center.lat, center.lng], [d.lat, d.lng]);
+      const icon = L.divIcon({
+        className: '',
+        html: `<div class="minimap-pin" style="background:${color};">${emoji}</div>`,
+        iconSize: [14,14], iconAnchor: [7,7],
+      });
+      const marker = L.marker([d.lat, d.lng], { icon }).addTo(mm);
+      marker.bindTooltip(
+        `<b>${d.short_name}</b><br><span style="color:#94a3b8;">${DIV_LABEL[d.division]} · ${d.city}</span><br>Pulse <b style="color:${color};">${scTxt}</b> · ${kmFromCenter.toFixed(1)} km`,
+        { className: 'minimap-tooltip', direction: 'top', offset: [0, -8] }
+      );
+      marker.on('click', () => {
+        delete popupViewState[i];
+        map.closePopup();
+        setTimeout(() => dealerMarkers[i] && dealerMarkers[i].marker.openPopup(), 50);
+      });
+      // Hover handler: if any other pin is within MINI_HOVER_NEIGHBOR_PX, zoom in
+      // to spread them apart so the user can click confidently.
+      marker.on('mouseover', () => maybeZoomToSeparate(i));
+      pinLayers.set(i, marker);
+      neighborsAll.push({ i, lat: d.lat, lng: d.lng });
+    });
+    miniMapState = { dealerIdx, neighborsAll, pinLayers, centerLatLng: [center.lat, center.lng] };
+    if (neighborsAll.length === 0) {
+      // Show an unobtrusive note overlay so the lens isn't a dead box
+      const note = L.control({ position: 'topleft' });
+      note.onAdd = () => {
+        const div = L.DomUtil.create('div', 'minimap-legend');
+        div.style.position = 'static';
+        div.style.margin = '6px';
+        div.textContent = 'No other outlets in lens · pan/zoom to explore';
+        return div;
+      };
+      note.addTo(mm);
+    }
+  };
+
+  miniMap = mm;
+  // Wait one frame so the map computes its size before we project points
+  requestAnimationFrame(() => {
+    try { mm.invalidateSize(); } catch(e) {}
+    placePins();
+  });
+}
+
+// When a pin is hovered, if any other pin is within MINI_HOVER_NEIGHBOR_PX of
+// the hovered one, zoom in until they're spread out enough to click separately.
+function maybeZoomToSeparate(hoveredIdx) {
+  if (!miniMap || !miniMapState) return;
+  const hovered = DASHBOARD_DATA.dealers[hoveredIdx];
+  if (!hovered) return;
+  const hoveredPt = miniMap.latLngToContainerPoint([hovered.lat, hovered.lng]);
+  let crowded = false;
+  miniMapState.pinLayers.forEach((_m, i) => {
+    if (i === hoveredIdx) return;
+    const d = DASHBOARD_DATA.dealers[i];
+    const pt = miniMap.latLngToContainerPoint([d.lat, d.lng]);
+    const dx = pt.x - hoveredPt.x, dy = pt.y - hoveredPt.y;
+    if (Math.sqrt(dx*dx + dy*dy) < MINI_HOVER_NEIGHBOR_PX) crowded = true;
+  });
+  if (!crowded) return;
+  // Zoom in toward the hovered pin one step at a time until either we hit
+  // max zoom or no neighbor is within MINI_HOVER_NEIGHBOR_PX anymore.
+  const cur = miniMap.getZoom();
+  if (cur >= MINI_MAX_ZOOM) return;
+  miniMap.setView([hovered.lat, hovered.lng], Math.min(cur + 2, MINI_MAX_ZOOM), { animate: true });
+}
+
+// Wire dealer popup open/close to mini-map lifecycle — DISABLED.
+// map.on('popupopen', (ev) => {
+//   const found = dealerMarkers.findIndex(x => x.marker === ev.layer);
+//   if (found < 0) return;
+//   if (popupViewState[found]) return;
+//   initMiniMapWhenReady(found);
+// });
+// map.on('popupclose', (ev) => {
+//   const found = dealerMarkers.findIndex(x => x.marker === ev.layer);
+//   if (found < 0) return;
+//   tearDownMiniMap();
+// });
+map.on('popupclose', (ev) => {
+  const found = rtoMarkers.find(x => x.marker === ev.layer);
+  if (!found) return;
+  if (rtoTrendChart) { try { rtoTrendChart.destroy(); } catch(e) {} rtoTrendChart = null; }
+});
+
+// Pill + year-select delegation (works for any open RTO popup)
+document.addEventListener('click', (e) => {
+  const pill = e.target.closest('[data-rto-mode]');
+  if (pill) {
+    e.stopPropagation();
+    const code = pill.dataset.rtoCode;
+    const mode = pill.dataset.rtoMode;
+    if (!rtoChartState[code]) return;
+    rtoChartState[code].mode = mode;
+    // Toggle active class
+    document.querySelectorAll(`[data-rto-code="${code}"][data-rto-mode]`).forEach(b =>
+      b.classList.toggle('active', b.dataset.rtoMode === mode));
+    // Show/hide year selector
+    const sel = document.querySelector(`select.rto-year-select[data-rto-code="${code}"]`);
+    if (sel) sel.style.display = mode === 'monthly' ? '' : 'none';
+    const found = rtoMarkers.find(x => x.data.code === code);
+    if (found) drawRtoTrendChart(found.data);
+  }
+});
+document.addEventListener('change', (e) => {
+  const sel = e.target.closest('select.rto-year-select[data-rto-code]');
+  if (!sel) return;
+  const code = sel.dataset.rtoCode;
+  if (!rtoChartState[code]) return;
+  rtoChartState[code].year = Number(sel.value);
+  const found = rtoMarkers.find(x => x.data.code === code);
+  if (found) drawRtoTrendChart(found.data);
+});
+</script>
+<script id="js8">
+// ===== Analytics Charts =====
+let chartRank, chartCategory, chartTrend, chartCities, chartRto, chartCross;
+Chart.defaults.color = '#94a3b8';
+Chart.defaults.borderColor = '#334155';
+Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+function getSelectedDealers() {
+  const range = getRange();
+  const out = [];
+  DASHBOARD_DATA.dealers.forEach((d, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    if (!selectedCities.has(cityOf)) return;
+    if (!selectedDivisions.has(d.division)) return;
+    if (d.district && !selectedDistricts.has(d.district)) return;
+    if (!dealerMatchesCategory(d)) return;
+    const eff = effectiveScore(d, range);
+    out.push({ ...d, _sample: eff.sample, _score: eff.score });
+  });
+  return out;
+}
+
+function renderAnalytics() {
+  if (!document.getElementById('analytics-view').classList.contains('active')) return;
+  const range = getRange();
+  const dealers = getSelectedDealers();
+  const withScore = dealers.filter(d => d._score != null).sort((a,b) => b._score - a._score);
+
+  // Rank chart — top 10 + bottom 10
+  const top10 = withScore.slice(0, 10);
+  const bot10 = withScore.slice(-10).reverse();
+  const seen = new Set();
+  const combined = [...top10, ...bot10].filter(d => { if (seen.has(d.short_name+d.city)) return false; seen.add(d.short_name+d.city); return true; });
+  const rankLabels = combined.map(d => `${d.short_name} (${d.city.slice(0,3)})`);
+  const rankData = combined.map(d => d._score);
+  const rankColors = combined.map(d => scoreColor10(d._score));
+  if (chartRank) chartRank.destroy();
+  chartRank = new Chart(document.getElementById('chart-rank'), {
+    type: 'bar',
+    data: { labels: rankLabels, datasets: [{ label: 'Score −5 to +5', data: rankData, backgroundColor: rankColors, borderRadius: 4 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#1e293b', borderColor: '#475569', borderWidth: 1 } },
+      scales: { x: { min: -5, max: 5, grid: { color: '#334155' } }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } }
+  });
+
+  // Category chart — aggregate pos/neg per category across selected dealers
+  const catAgg = {};
+  dealers.forEach(d => {
+    Object.entries(d.absa_categories || {}).forEach(([cat, v]) => {
+      if (!catAgg[cat]) catAgg[cat] = { pos: 0, neg: 0 };
+      catAgg[cat].pos += v.pos; catAgg[cat].neg += v.neg;
+    });
+  });
+  const catEntries = Object.entries(catAgg).map(([cat, v]) => ({
+    cat,
+    score: v.pos+v.neg > 0 ? (v.pos/(v.pos+v.neg))*10 - 5 : null,
+    total: v.pos+v.neg
+  }))
+  .filter(e => e.score != null)
+  .sort((a,b) => b.total - a.total);
+  if (chartCategory) chartCategory.destroy();
+  chartCategory = new Chart(document.getElementById('chart-category'), {
+    type: 'bar',
+    data: { labels: catEntries.map(e => CAT_LABEL[e.cat] || e.cat), datasets: [{ data: catEntries.map(e => e.score), backgroundColor: catEntries.map(e => scoreColor10(e.score)), borderRadius: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { min: -5, max: 5, grid: { color: '#334155' } }, x: { grid: { display: false }, ticks: { font: { size: 11 } } } } }
+  });
+}
+</script>
+<script id="js9">
+// ===== More Charts =====
+function renderMoreCharts() {
+  const range = getRange();
+  const dealers = getSelectedDealers();
+
+  // Trend chart — monthly sentiment across selected dealers
+  const monthCounts = {};
+  dealers.forEach(d => {
+    Object.entries(d.reviews_by_month || {}).forEach(([ym, m]) => {
+      if (!monthCounts[ym]) monthCounts[ym] = [0,0,0,0,0];
+      if (m.by_rating) for (let i=0;i<5;i++) monthCounts[ym][i] += m.by_rating[i] || 0;
+    });
+  });
+  const months = Object.keys(monthCounts).sort();
+  const sentLine = months.map(ym => {
+    const d = monthCounts[ym]; const tot = d.reduce((a,b)=>a+b,0);
+    return tot > 0 ? (d[3]+d[4])/tot*10 - 5 : null;
+  });
+  const volBar = months.map(ym => monthCounts[ym].reduce((a,b)=>a+b,0));
+  if (chartTrend) chartTrend.destroy();
+  chartTrend = new Chart(document.getElementById('chart-trend'), {
+    type: 'line',
+    data: { labels: months, datasets: [
+      { label: 'Pulse Score (−5 to +5)', data: sentLine, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.15)', tension: 0.3, yAxisID: 'y', fill: true, spanGaps: true },
+      { label: 'Review volume', data: volBar, borderColor: '#64748b', backgroundColor: 'rgba(100,116,139,0.2)', type: 'bar', yAxisID: 'y2', borderRadius: 2 }
+    ]},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { font: { size: 10 } } } },
+      scales: { y: { position: 'left', min: -5, max: 5, grid: { color: '#334155' }, ticks: { font: { size: 10 } } },
+                y2: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+                x: { grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45 } } } }
+  });
+
+  // Outlets by city — stacked bar by division
+  const cityByDiv = {};
+  dealers.forEach(d => {
+    if (!cityByDiv[d.city]) cityByDiv[d.city] = { arena:0, nexa:0, service:0, true_value:0, commercial:0 };
+    cityByDiv[d.city][d.division] = (cityByDiv[d.city][d.division]||0) + 1;
+  });
+  const cityNames = Object.keys(cityByDiv).sort((a,b) => Object.values(cityByDiv[b]).reduce((x,y)=>x+y,0) - Object.values(cityByDiv[a]).reduce((x,y)=>x+y,0)).slice(0, 12);
+  const divs = ['arena','nexa','service','true_value','commercial'];
+  const divColors = { arena:'#3b82f6', nexa:'#a855f7', service:'#14b8a6', true_value:'#f59e0b', commercial:'#ef4444' };
+  if (chartCities) chartCities.destroy();
+  chartCities = new Chart(document.getElementById('chart-cities'), {
+    type: 'bar',
+    data: { labels: cityNames, datasets: divs.map(div => ({
+      label: DIV_LABEL[div], data: cityNames.map(c => cityByDiv[c][div] || 0),
+      backgroundColor: divColors[div], stack: 's', borderRadius: 2
+    }))},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { font: { size: 10 }, boxWidth: 10 } } },
+      scales: { y: { stacked: true, grid: { color: '#334155' }, ticks: { font: { size: 10 } } },
+                x: { stacked: true, grid: { display: false }, ticks: { font: { size: 9 }, maxRotation: 45 } } } }
+  });
+}
+</script>
+<script id="js10">
+// ===== RTO Chart + Mentions =====
+function renderRtoAndMentions() {
+  const range = getRange();
+
+  // Maruti Share by RTO — top 15 in selected cities
+  const rtoData = DASHBOARD_DATA.rtos
+    .filter(r => selectedCities.has(RTO_TO_CITY[r.code]))
+    .map(r => {
+      const s = sumRangeRTO(r, range.fromY, range.fromM, range.toY, range.toM);
+      return { code: r.code, city: r.city, share: s.share != null ? s.share*100 : null, cars: s.cars };
+    })
+    .filter(r => r.share != null)
+    .sort((a,b) => b.cars - a.cars)
+    .slice(0, 15);
+
+  if (chartRto) chartRto.destroy();
+  chartRto = new Chart(document.getElementById('chart-rto'), {
+    type: 'bar',
+    data: { labels: rtoData.map(r => `${r.code} ${r.city.slice(0,10)}`),
+      datasets: [{ data: rtoData.map(r => r.share), backgroundColor: rtoData.map(r => shareColor(r.share)), borderRadius: 3 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { min: 0, max: 80, grid: { color: '#334155' }, ticks: { callback: v => v+'%', font: { size: 10 } } },
+                y: { grid: { display: false }, ticks: { font: { size: 10 } } } } }
+  });
+
+  // Top mentions
+  const dealers = getSelectedDealers();
+  const allMentions = [];
+  dealers.forEach(d => (d.absa_top_mentions || []).forEach(m => allMentions.push(m)));
+  const merged = {};
+  allMentions.forEach(m => {
+    const k = `${m.sentiment}|${m.text.toLowerCase()}`;
+    if (!merged[k]) merged[k] = { text: m.text, sentiment: m.sentiment, count: 0 };
+    merged[k].count += m.count;
+  });
+  const sorted = Object.values(merged).sort((a,b) => b.count - a.count).slice(0, 16);
+  const html = sorted.map(m => `<div class="mention ${m.sentiment==='positive'?'pos':'neg'}">
+    <span style="flex:1;">${m.text}</span><span class="count">×${m.count}</span></div>`).join('');
+  document.getElementById('mentions-list').innerHTML = html || '<div style="color:#64748b;font-size:0.78rem;padding:10px;">No mentions in current selection.</div>';
+
+  // ===== Cross-signal scatter =====
+  // X = Maruti share %, Y = avg outlet sentiment (-5..+5), r = log(cars), color = quadrant
+  const range2 = getRange();
+  const prior2 = priorRange(range2);
+  const visIdxs = [];
+  DASHBOARD_DATA.dealers.forEach((d, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    const divOk = selectedDivisions.has(d.division);
+    const cityOk = cityOf && selectedCities.has(cityOf);
+    const distOk = !d.district || selectedDistricts.has(d.district);
+    if (cityOk && divOk && distOk) visIdxs.push(i);
+  });
+  const join2 = joinOutletsToRTOs(visIdxs, range2);
+  const points = { internal: [], lead: [], competitor: [], healthy: [] };
+  Object.entries(join2).forEach(([code, lst]) => {
+    const rto = DASHBOARD_DATA.rtos.find(r => r.code === code);
+    if (!rto) return;
+    const stats = rtoCrossStats(rto, lst, range2, prior2);
+    if (stats.avg == null || stats.sharePct == null) return;
+    const q = classifyQuadrant(stats);
+    if (!points[q]) return;
+    points[q].push({
+      x: stats.sharePct,
+      y: stats.avg,
+      r: Math.max(4, Math.min(22, 4 + 3*Math.log10(Math.max(10, stats.cur.cars)))),
+      label: `${rto.code} · ${rto.city}`,
+      cars: stats.cur.cars,
+      n: lst.length,
+    });
+  });
+  if (chartCross) chartCross.destroy();
+  chartCross = new Chart(document.getElementById('chart-cross'), {
+    type: 'bubble',
+    data: { datasets: ['internal','lead','competitor','healthy'].map(q => ({
+      label: CROSS_LABEL[q], data: points[q],
+      backgroundColor: CROSS_COLORS[q] + 'cc',
+      borderColor: CROSS_COLORS[q], borderWidth: 1.5,
+    }))},
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 10 } },
+        tooltip: { callbacks: { label: ctx => {
+          const p = ctx.raw;
+          return `${p.label} · share ${p.x.toFixed(1)}% · Pulse ${p.y >= 0 ? '+' : ''}${p.y.toFixed(1)} · ${p.cars.toLocaleString()} cars · ${p.n} outlet${p.n===1?'':'s'}`;
+        }}}
+      },
+      scales: {
+        x: { title: { display: true, text: 'Maruti share (%)', color: '#94a3b8', font: { size: 11 } },
+             min: 0, max: 80, grid: { color: '#334155' }, ticks: { callback: v => v+'%', font: { size: 10 } } },
+        y: { title: { display: true, text: 'Avg Pulse Score (−5 to +5)', color: '#94a3b8', font: { size: 11 } },
+             min: -5, max: 5, grid: { color: '#334155' }, ticks: { font: { size: 10 } } }
+      }
+    }
+  });
+}
+
+const _origRenderAnalytics = renderAnalytics;
+renderAnalytics = function() {
+  _origRenderAnalytics();
+  renderMoreCharts();
+  renderRtoAndMentions();
+};
+</script>
+<script id="js11">
+// ===== UI Wiring =====
+// Legend body content — built by refreshLegend() so it can switch between share/cross modes.
+
+// Collapsible cards (legend, tile picker) toggle on header click
+document.querySelectorAll('.collapsible-card .cc-header').forEach(h => {
+  h.onclick = () => h.parentElement.classList.toggle('open');
+});
+
+// ===== Generic dropdown open/close manager =====
+const ALL_DROPDOWNS = ['dd-time','dd-cities','dd-districts','dd-type','dd-cats','dd-cmp','dd-layers'];
+function closeAllDropdowns(except) {
+  ALL_DROPDOWNS.forEach(id => { if (id !== except) document.getElementById(id).classList.remove('open'); });
+}
+ALL_DROPDOWNS.forEach(id => {
+  const btn = document.getElementById(id + '-btn');
+  const panel = document.getElementById(id);
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const wasOpen = panel.classList.contains('open');
+    closeAllDropdowns();
+    if (!wasOpen) panel.classList.add('open');
+  };
+  panel.addEventListener('click', e => e.stopPropagation());
+});
+document.addEventListener('click', () => closeAllDropdowns());
+
+// ===== Time presets (inside dd-time) =====
+const TIME_LABEL = { 'latest-year':'Latest year','last-3m':'Last 3m','last-6m':'Last 6m','last-12m':'Last 12m','last-5y':'Last 5y','custom':'Custom' };
+document.querySelectorAll('#dd-time .pill[data-preset]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('#dd-time .pill[data-preset]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activePreset = btn.dataset.preset;
+    document.getElementById('custom-range-wrap').style.display = activePreset === 'custom' ? 'block' : 'none';
+    document.getElementById('dd-time-label').textContent = TIME_LABEL[activePreset];
+    render();
+  };
+});
+
+// ===== Type dropdown (multi-select) =====
+function updateTypeLabel() {
+  const n = selectedDivisions.size;
+  if (n === ALL_DIVISIONS.length) document.getElementById('dd-type-label').textContent = 'All';
+  else if (n === 0) document.getElementById('dd-type-label').textContent = 'None';
+  else if (n === 1) document.getElementById('dd-type-label').textContent = DIV_LABEL[Array.from(selectedDivisions)[0]];
+  else document.getElementById('dd-type-label').textContent = `${n} types`;
+}
+document.querySelectorAll('#dd-type input[data-div]').forEach(input => {
+  input.onchange = () => {
+    const div = input.dataset.div;
+    if (input.checked) selectedDivisions.add(div); else selectedDivisions.delete(div);
+    updateTypeLabel();
+    render();
+  };
+});
+document.querySelectorAll('#dd-type .pill[data-action]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (btn.dataset.action === 'all') ALL_DIVISIONS.forEach(d => selectedDivisions.add(d));
+    else selectedDivisions.clear();
+    document.querySelectorAll('#dd-type input[data-div]').forEach(inp => {
+      inp.checked = selectedDivisions.has(inp.dataset.div);
+    });
+    updateTypeLabel();
+    render();
+  };
+});
+
+// ===== Categories dropdown (multi-select) =====
+function populateCatsList() {
+  const listEl = document.getElementById('dd-cats-list');
+  listEl.innerHTML = '';
+  CAT_ALL.forEach(cat => {
+    const row = document.createElement('label');
+    row.className = 'dropdown-item';
+    const checked = selectedCategories.has(cat) ? 'checked' : '';
+    row.innerHTML = `<input type="checkbox" ${checked} data-cat="${cat}"><span>${CAT_LABEL[cat] || cat}</span>`;
+    row.querySelector('input').addEventListener('change', e => {
+      if (e.target.checked) selectedCategories.add(cat); else selectedCategories.delete(cat);
+      updateCatsLabel();
+      render();
+    });
+    listEl.appendChild(row);
+  });
+}
+function updateCatsLabel() {
+  const n = selectedCategories.size;
+  document.getElementById('dd-cats-label').textContent =
+    n === 0 ? 'All' : (n === 1 ? CAT_LABEL[Array.from(selectedCategories)[0]] : `${n} selected`);
+}
+document.querySelectorAll('#dd-cats .pill[data-action]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (btn.dataset.action === 'all') CAT_ALL.forEach(c => selectedCategories.add(c));
+    else selectedCategories.clear();
+    populateCatsList(); updateCatsLabel(); render();
+  };
+});
+
+// ===== Compare dropdown =====
+const CMP_LABEL = { off:'Off', prior:'vs prior', yoy:'YoY' };
+document.querySelectorAll('#dd-cmp input[name="cmp"]').forEach(input => {
+  input.onchange = () => {
+    compareMode = input.value;
+    document.getElementById('dd-cmp-label').textContent = CMP_LABEL[compareMode];
+    render();
+  };
+});
+
+// ===== Layers dropdown =====
+function updateLayersLabel() {
+  const on = [];
+  if (layerState.outlets) on.push('Outlets');
+  if (layerState.rtos) on.push('RTOs');
+  if (layerState.heatmap) on.push('Heatmap');
+  document.getElementById('dd-layers-label').textContent = on.length ? on.join(' · ') : 'None';
+}
+document.querySelectorAll('#dd-layers input[data-layer]').forEach(input => {
+  input.onchange = () => {
+    const k = input.dataset.layer;
+    layerState[k] = input.checked;
+    if (k === 'outlets') layerState.outlets ? dealerLayer.addTo(map) : map.removeLayer(dealerLayer);
+    if (k === 'rtos')    layerState.rtos    ? rtoLayer.addTo(map)    : map.removeLayer(rtoLayer);
+    if (k === 'heatmap') toggleHeatmap(layerState.heatmap);
+    updateLayersLabel();
+  };
+});
+document.querySelectorAll('#dd-layers input[name="rtomode"]').forEach(input => {
+  input.onchange = () => {
+    rtoColorMode = input.value;
+    refreshLegend();
+    render();
+  };
+});
+
+function refreshLegend() {
+  const rtoSection = rtoColorMode === 'cross' ? `
+    <div class="legend-section"><div class="legend-sub">RTO · Cross-signal Quadrant</div>
+      <div class="legend-row"><span class="leg-sq" style="background:${CROSS_COLORS.internal}"></span> Internal cause</div>
+      <div class="legend-row"><span class="leg-sq" style="background:${CROSS_COLORS.lead}"></span> Lead indicator</div>
+      <div class="legend-row"><span class="leg-sq" style="background:${CROSS_COLORS.competitor}"></span> Competitive pressure</div>
+      <div class="legend-row"><span class="leg-sq" style="background:${CROSS_COLORS.healthy}"></span> Healthy</div>
+      <div class="legend-row"><span class="leg-sq" style="background:${CROSS_COLORS.no_data}"></span> No outlet data</div>
+    </div>` : `
+    <div class="legend-section"><div class="legend-sub">RTO · Maruti Share</div>
+      <div class="legend-row"><span class="leg-sq" style="background:#16a34a"></span> ≥ 50%</div>
+      <div class="legend-row"><span class="leg-sq" style="background:#eab308"></span> 35–50%</div>
+      <div class="legend-row"><span class="leg-sq" style="background:#f97316"></span> 20–35%</div>
+      <div class="legend-row"><span class="leg-sq" style="background:#ef4444"></span> &lt; 20%</div>
+    </div>`;
+  document.getElementById('legend-body').innerHTML = `
+    <div class="legend-section"><div class="legend-sub">Outlet Pin · Type</div>
+      <div class="legend-row"><span class="leg-ico">🚗</span> Arena</div>
+      <div class="legend-row"><span class="leg-ico">💎</span> Nexa</div>
+      <div class="legend-row"><span class="leg-ico">🛠️</span> Service</div>
+      <div class="legend-row"><span class="leg-ico">🤝</span> True Value</div>
+      <div class="legend-row"><span class="leg-ico">🚚</span> Commercial</div>
+    </div>
+    <div class="legend-section"><div class="legend-sub">Halo · Pulse Score (−5 to +5)</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#16a34a"></span> +4 to +5 Performing strong</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#84cc16"></span> +1 to +2.5 On track</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#eab308"></span> 0 to +1 Watch</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#f97316"></span> −2.5 to −1 Needs focus</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#ef4444"></span> below −2.5 Priority</div>
+      <div class="legend-row"><span class="leg-dot" style="background:#64748b"></span> No reviews</div>
+    </div>
+    ${rtoSection}`;
+}
+
+// ===== View tabs =====
+document.querySelectorAll('.nav-tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    t.classList.add('active');
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById(t.dataset.view).classList.add('active');
+    if (t.dataset.view === 'map-view') setTimeout(() => map.invalidateSize(), 100);
+    render();
+  };
+});
+
+// ===== Show: All / Data toggle (single button) =====
+const dataToggleBtn = document.getElementById('data-toggle');
+dataToggleBtn.onclick = () => {
+  dataOnlyMode = !dataOnlyMode;
+  dataToggleBtn.classList.toggle('on', dataOnlyMode);
+  document.getElementById('dt-label').textContent = dataOnlyMode ? 'Data only' : 'All';
+  render();
+};
+
+// ===== Insights button (placeholder) =====
+document.getElementById('btn-insights').onclick = (e) => {
+  e.stopPropagation();
+  closeAllDropdowns();
+  openInsights();
+};
+</script>
+
+<script id="js11b">
+// ===== Insights generation (template-based) =====
+function openInsights() {
+  const overlay = document.getElementById('insights-overlay');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden','false');
+  renderInsights();
+}
+function closeInsights() {
+  const overlay = document.getElementById('insights-overlay');
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden','true');
+}
+document.getElementById('insights-close').onclick = closeInsights;
+document.getElementById('insights-overlay').addEventListener('click', e => {
+  if (e.target.id === 'insights-overlay') closeInsights();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('insights-overlay').classList.contains('open')) closeInsights();
+});
+
+function topNegCats(d, n) {
+  return Object.entries(d.absa_categories || {})
+    .filter(([k,v]) => v.neg > 0)
+    .sort((a,b) => b[1].neg - a[1].neg)
+    .slice(0, n)
+    .map(([k,v]) => ({ cat: k, label: CAT_LABEL[k]||k, neg: v.neg, pos: v.pos }));
+}
+function topNegMentions(d, n) {
+  return (d.absa_top_mentions || []).filter(m => m.sentiment === 'negative').slice(0, n);
+}
+
+// "−2.3 (12 reviews · 78% negative)" style line
+function describeOutlet(d, score, sample) {
+  const reviews = (d.absa_reviews || []).length || sample.count || 0;
+  const total = (d.absa_mentions_pos || 0) + (d.absa_mentions_neg || 0);
+  const negShare = total > 0 ? Math.round((d.absa_mentions_neg / total) * 100) : null;
+  const parts = [`<em>${fmtScore5(score)}</em> Pulse Score`];
+  if (reviews > 0) parts.push(`${reviews} review${reviews===1?'':'s'}`);
+  if (negShare != null) parts.push(`${negShare}% negative`);
+  return parts.join(' · ');
+}
+
+function renderInsights() {
+  const range = getRange();
+  const prior = priorRange(range);
+  const dealers = getSelectedDealers();
+  const withScore = dealers.filter(d => d._score != null);
+
+  document.getElementById('insights-sub').textContent =
+    `${dealers.length} outlet${dealers.length===1?'':'s'} in selection · ${range.label}` +
+    (prior ? ` · compared to ${MONTHS[prior.fromM-1]} ${prior.fromY} – ${MONTHS[prior.toM-1]} ${prior.toY}` : '');
+
+  const sections = [];
+
+  // 1. Defaulters — bottom 5 outlets by score
+  const defaulters = [...withScore].sort((a,b) => a._score - b._score).slice(0, 5);
+  let defHtml;
+  if (defaulters.length === 0) {
+    defHtml = '<div class="ins-empty">No outlets in current selection have enough review data to score.</div>';
+  } else {
+    defHtml = defaulters.map(d => {
+      const cats = topNegCats(d, 2);
+      const mentions = topNegMentions(d, 2);
+      const catsTxt = cats.length
+        ? `Concentrated in <em>${cats.map(c => `${c.label} (${c.neg} neg)`).join(', ')}</em>.`
+        : 'No specific categories tagged yet.';
+      const mentionsTxt = mentions.length
+        ? ` Recurring complaints: ${mentions.map(m => `&ldquo;${m.text}&rdquo;`).join('; ')}.`
+        : '';
+      const where = `${d.city}${d.district && d.district !== d.city ? ' / ' + d.district : ''}`;
+      return `<div class="ins-card bad">
+        <div class="ic-head">
+          <span class="ic-name">${d.short_name}</span>
+          <span class="ic-meta">${DIV_LABEL[d.division]} · ${where}</span>
+          <span class="ic-score" style="color:${scoreColor10(d._score)};">${fmtScore5(d._score)}</span>
+        </div>
+        <div class="ic-body">${describeOutlet(d, d._score, d._sample)}. ${catsTxt}${mentionsTxt}</div>
+      </div>`;
+    }).join('');
+  }
+  sections.push({ title: 'Priority outlets · most opportunity',
+                  sub: 'Lowest Pulse Scores — start branch-manager conversations here.',
+                  html: defHtml });
+
+  // 2. Steepest decline (only when comparison mode active)
+  if (prior) {
+    const declines = [];
+    DASHBOARD_DATA.dealers.forEach((d, i) => {
+      if (!dealers.find(x => x === d)) return;
+      const curEff  = effectiveScore(d, range);
+      const prevEff = effectiveScore(d, prior);
+      // Only include outlets with real in-range data in BOTH periods
+      // (no all-time fallback for decline math).
+      if (curEff.score != null && prevEff.score != null && !curEff.isAllTime && !prevEff.isAllTime) {
+        declines.push({ d, curEff, prevEff, delta: curEff.score - prevEff.score });
+      }
+    });
+    declines.sort((a,b) => a.delta - b.delta);
+    const worst = declines.slice(0, 3);
+    let decHtml;
+    if (worst.length === 0 || worst[0].delta >= 0) {
+      decHtml = '<div class="ins-empty">No outlets show a decline in this comparison window.</div>';
+    } else {
+      decHtml = worst.filter(x => x.delta < 0).map(x => {
+        const where = `${x.d.city}${x.d.district && x.d.district !== x.d.city ? ' / ' + x.d.district : ''}`;
+        const curN = x.curEff.n_stars + x.curEff.n_absa;
+        const prevN = x.prevEff.n_stars + x.prevEff.n_absa;
+        return `<div class="ins-card warn">
+          <div class="ic-head">
+            <span class="ic-name">${x.d.short_name}</span>
+            <span class="ic-meta">${DIV_LABEL[x.d.division]} · ${where}</span>
+            <span class="ic-score" style="color:#f87171;">▼ ${x.delta.toFixed(1)}</span>
+          </div>
+          <div class="ic-body">Pulse Score dropped from <em>${fmtScore5(x.prevEff.score)}</em> to <em>${fmtScore5(x.curEff.score)}</em> (${curN} signals this period vs ${prevN} prior). Worth a closer look at what changed in this period.</div>
+        </div>`;
+      }).join('');
+    }
+    sections.push({ title: `Trending attention · vs ${compareMode === 'yoy' ? 'same window last year' : 'prior period'}`,
+                    sub: 'Outlets where Pulse Score has moved most.',
+                    html: decHtml });
+  }
+
+  // 3. Negative-mention spikes by category — categories that grew most in absolute neg count vs prior window
+  // Approximation: we don't have time-bucketed ABSA, so use total-neg per category in the selection.
+  const catAgg = {};
+  dealers.forEach(d => {
+    Object.entries(d.absa_categories || {}).forEach(([cat, v]) => {
+      if (!catAgg[cat]) catAgg[cat] = { pos: 0, neg: 0 };
+      catAgg[cat].pos += v.pos; catAgg[cat].neg += v.neg;
+    });
+  });
+  const worstCats = Object.entries(catAgg)
+    .map(([cat, v]) => ({ cat, label: CAT_LABEL[cat]||cat, ...v, share: v.pos+v.neg > 0 ? v.neg/(v.pos+v.neg) : 0, total: v.pos+v.neg }))
+    .filter(c => c.neg >= 2)
+    .sort((a,b) => b.neg - a.neg)
+    .slice(0, 3);
+  let catHtml;
+  if (worstCats.length === 0) {
+    catHtml = '<div class="ins-empty">No category has enough focus signals to flag.</div>';
+  } else {
+    catHtml = worstCats.map(c => {
+      const sharePct = Math.round(c.share * 100);
+      // Find which outlets contribute most to this negative bucket
+      const contributors = dealers
+        .map(d => ({ d, neg: ((d.absa_categories || {})[c.cat] || {neg:0}).neg }))
+        .filter(x => x.neg > 0)
+        .sort((a,b) => b.neg - a.neg)
+        .slice(0, 3);
+      const contribTxt = contributors.length
+        ? ` Largest contributors: ${contributors.map(x => `<em>${x.d.short_name}</em> (${x.neg})`).join(', ')}.`
+        : '';
+      return `<div class="ins-card bad">
+        <div class="ic-head">
+          <span class="ic-name">${c.label}</span>
+          <span class="ic-meta">${c.neg} negative mentions · ${sharePct}% of category</span>
+        </div>
+        <div class="ic-body">Customers flag <em>${c.label.toLowerCase()}</em> issues in ${sharePct}% of their mentions of this topic across ${dealers.length} outlets.${contribTxt}</div>
+      </div>`;
+    }).join('');
+  }
+  sections.push({ title: 'Top focus themes',
+                  sub: 'Categories most cited as focus areas across your selection.',
+                  html: catHtml });
+
+  // 4. Markets needing focus — cities with sub-zero average sentiment
+  const cityScores = {};
+  dealers.forEach(d => {
+    if (d._score == null) return;
+    if (!cityScores[d.city]) cityScores[d.city] = { sum: 0, n: 0, outlets: 0, neg: 0, total: 0 };
+    cityScores[d.city].sum += d._score;
+    cityScores[d.city].n++;
+    cityScores[d.city].outlets++;
+    cityScores[d.city].neg   += d.absa_mentions_neg || 0;
+    cityScores[d.city].total += (d.absa_mentions_pos || 0) + (d.absa_mentions_neg || 0);
+  });
+  const concernCities = Object.entries(cityScores)
+    .map(([city, s]) => ({ city, avg: s.sum / s.n, outlets: s.outlets, neg: s.neg, total: s.total }))
+    .filter(c => c.avg < 0)
+    .sort((a,b) => a.avg - b.avg);
+  let geoHtml;
+  if (concernCities.length === 0) {
+    geoHtml = '<div class="ins-empty">Every city in selection is performing strong. ✓</div>';
+  } else {
+    geoHtml = concernCities.map(c => {
+      const negPct = c.total > 0 ? Math.round(c.neg/c.total*100) : null;
+      return `<div class="ins-card warn">
+        <div class="ic-head">
+          <span class="ic-name">${c.city}</span>
+          <span class="ic-meta">${c.outlets} outlet${c.outlets===1?'':'s'} scored</span>
+          <span class="ic-score" style="color:${scoreColor10(c.avg)};">${fmtScore5(c.avg)}</span>
+        </div>
+        <div class="ic-body">Average outlet sentiment across ${c.city} is net-negative${negPct!=null?`, with ${negPct}% of ABSA mentions tagged as complaints`:''}. This whole market needs attention.</div>
+      </div>`;
+    }).join('');
+  }
+  sections.push({ title: 'Markets needing focus',
+                  sub: 'Cities where the average outlet has the most opportunity.',
+                  html: geoHtml });
+
+  // 5. Cross-signal: sentiment × Maruti registrations per RTO area
+  // Re-use visible-dealer set scoped to current selection.
+  const visibleIdxs = [];
+  DASHBOARD_DATA.dealers.forEach((d, i) => {
+    const cityOf = DEALER_TO_CITY[i];
+    const divOk = selectedDivisions.has(d.division);
+    const cityOk = cityOf && selectedCities.has(cityOf);
+    const distOk = !d.district || selectedDistricts.has(d.district);
+    if (cityOk && divOk && distOk) visibleIdxs.push(i);
+  });
+  const crossJoin = joinOutletsToRTOs(visibleIdxs, range);
+  const crossRows = [];
+  Object.entries(crossJoin).forEach(([code, outletList]) => {
+    const rto = DASHBOARD_DATA.rtos.find(r => r.code === code);
+    if (!rto) return;
+    const stats = rtoCrossStats(rto, outletList, range, prior);
+    if (stats.avg == null) return;
+    const q = classifyQuadrant(stats);
+    crossRows.push({ rto, code, stats, q, outlets: outletList });
+  });
+  // Sort: internal first, then lead, then competitor, then healthy; within each by car volume desc.
+  const Q_ORDER = { internal: 0, lead: 1, competitor: 2, healthy: 3, no_data: 4 };
+  crossRows.sort((a,b) => Q_ORDER[a.q] - Q_ORDER[b.q] || b.stats.cur.cars - a.stats.cur.cars);
+
+  let crossHtml;
+  if (crossRows.length === 0) {
+    crossHtml = '<div class="ins-empty">No RTO area in current selection has both outlet sentiment AND registration data within ' + JOIN_RADIUS_KM + 'km.</div>';
+  } else {
+    crossHtml = crossRows.map(({ rto, stats, q, outlets }) => {
+      const cardClass = (q === 'internal') ? 'bad' : (q === 'lead' || q === 'competitor') ? 'warn' : 'good';
+      const sharePart = stats.sharePct != null ? `${stats.sharePct.toFixed(1)}%` : 'no data';
+      const deltaPart = stats.shareDeltaPp != null
+        ? `${stats.shareDeltaPp >= 0 ? '▲ +' : '▼ '}${Math.abs(stats.shareDeltaPp).toFixed(1)} pp`
+        : '';
+      const variancePart = (outlets.length >= 3 && stats.hi != null && (stats.hi - stats.lo) > 2)
+        ? ` Spread is wide (${stats.lo.toFixed(1)} to ${stats.hi.toFixed(1)}) — likely a 1-bad-apple situation, not regional.`
+        : (outlets.length >= 3 ? ` Outlets cluster tightly (${stats.lo.toFixed(1)} to ${stats.hi.toFixed(1)}) — regional pattern.` : '');
+      // Worst contributors
+      const worstNames = outlets
+        .map(o => ({ name: o.dealer.short_name, sc: effectiveScore(o.dealer, range).score }))
+        .filter(x => x.sc != null)
+        .sort((a,b) => a.sc - b.sc)
+        .slice(0, 3)
+        .map(x => `${x.name} (${fmtScore5(x.sc)})`)
+        .join(', ');
+      let narrative = '';
+      if (q === 'internal') {
+        narrative = `Maruti share is <em>${sharePart}</em>${deltaPart?` (${deltaPart})`:''} AND outlet sentiment averages <em>${fmtScore5(stats.avg)}</em>. Operations focus — customer experience is hurting sales. ${outlets.length} outlet${outlets.length===1?'':'s'} in scope${worstNames?`: ${worstNames}`:''}.${variancePart}`;
+      } else if (q === 'lead') {
+        narrative = `Sentiment is <em>${fmtScore5(stats.avg)}</em> across ${outlets.length} outlet${outlets.length===1?'':'s'} but Maruti share is holding at <em>${sharePart}</em>${deltaPart?` (${deltaPart})`:''}. Pulse Score is an early signal — share may follow if not addressed.${worstNames?` Worst: ${worstNames}.`:''}${variancePart}`;
+      } else if (q === 'competitor') {
+        narrative = `Outlet sentiment is healthy at <em>${fmtScore5(stats.avg)}</em> but Maruti share is only <em>${sharePart}</em>${deltaPart?` (${deltaPart})`:''}. Customers are happy with our service but not buying — market dynamics (competitor pricing/launches/availability) are the likely driver. Sales team isn't the problem.`;
+      } else {
+        narrative = `Sentiment <em>${fmtScore5(stats.avg)}</em> and Maruti share <em>${sharePart}</em>${deltaPart?` (${deltaPart})`:''} — ${outlets.length} outlet${outlets.length===1?'':'s'}. No action needed — performing strong.`;
+      }
+      return `<div class="ins-card ${cardClass}">
+        <div class="ic-head">
+          <span class="ic-name">${rto.code} · ${rto.city}</span>
+          <span class="ic-meta" style="color:${CROSS_COLORS[q]};font-weight:600;">${CROSS_LABEL[q]}</span>
+          <span class="ic-score">${fmtScore5(stats.avg)} · ${sharePart}</span>
+        </div>
+        <div class="ic-body">${narrative}</div>
+      </div>`;
+    }).join('');
+  }
+  sections.push({ title: 'Cross-signal · sentiment × Maruti registrations',
+                  sub: 'RTO areas joined to outlets within ' + JOIN_RADIUS_KM + ' km. Quadrant tells you whether an issue is internal, external, or a leading indicator.',
+                  html: crossHtml });
+
+  // Render
+  document.getElementById('insights-body').innerHTML = sections.map(s => `
+    <div class="ins-section">
+      <div class="ins-section-head"><h3>${s.title}</h3><span class="ins-section-sub">${s.sub}</span></div>
+      ${s.html}
+    </div>`).join('');
+}
+</script>
+<script id="js12">
+// ===== Cities + Districts dropdowns (search/populate + bulk actions) =====
+// Open/close is handled centrally in js11 via ALL_DROPDOWNS.
+document.getElementById('dd-cities-search').addEventListener('input', populateCityList);
+document.querySelectorAll('#dd-cities .pill[data-action]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (btn.dataset.action === 'all') CITIES.forEach(c => selectedCities.add(c.city));
+    else selectedCities.clear();
+    populateCityList(); updateCityLabel();
+    populateDistrictList(); updateDistrictLabel();
+    render();
+  };
+});
+
+document.getElementById('dd-districts-search').addEventListener('input', populateDistrictList);
+document.querySelectorAll('#dd-districts .pill[data-action]').forEach(btn => {
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    const inScope = new Set(DASHBOARD_DATA.dealers
+      .filter(d => selectedCities.has(d.city)).map(d => d.district).filter(Boolean));
+    if (btn.dataset.action === 'all') inScope.forEach(d => selectedDistricts.add(d));
+    else inScope.forEach(d => selectedDistricts.delete(d));
+    populateDistrictList(); updateDistrictLabel(); render();
+  };
+});
+
+// ===== Inline review-list inside the dealer popup (replaces side drawer) =====
+// State per dealer: which view mode the popup is in.
+//   { mode: 'category', cat, sent, visible }      ← click a cat-row
+//   { mode: 'entity',   entity, visible }         ← click an ent-row
+const popupViewState = {};
+
+function snippetHL(text, snippets) {
+  if (!text) return '';
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  let html = esc(text);
+  const uniq = Array.from(new Set(snippets.filter(s => s && s.length >= 3)))
+                    .sort((a,b) => b.length - a.length);
+  for (const s of uniq) {
+    const re = new RegExp(s.replace(/[-/\\^$*+?.()|[\]{}]/g,'\\$&').replace(/\s+/g,'\\s+'), 'gi');
+    html = html.replace(re, m => `<mark class="absa-hl">${m}</mark>`);
+  }
+  return html;
+}
+
+// Date-in-range check: ISO YYYY-MM-DD vs the active range.
+function dateInRange(iso, range) {
+  if (!iso) return false;
+  const [y, m] = iso.split('-').map(Number);
+  const idx = y*12 + (m-1);
+  const fromIdx = range.fromY*12 + (range.fromM-1);
+  const toIdx   = range.toY*12   + (range.toM-1);
+  return idx >= fromIdx && idx <= toIdx;
+}
+
+// Build the reviews-mode HTML for a dealer's popup. Replaces the popup's
+// inner content when a category row OR entity row is clicked.
+function buildReviewsPopupContent(dealerIdx, range) {
+  const d = DASHBOARD_DATA.dealers[dealerIdx];
+  const state = popupViewState[dealerIdx];
+  if (!d || !state) return '';
+  const { mode, visible } = state;
+
+  // Predicate + UI metadata vary by mode
+  let predicate, snippetExtractor, headerTitle, headerTag, headerTagCls;
+  if (mode === 'entity') {
+    const entLower = state.entity.toLowerCase();
+    predicate = r => (r.items || []).some(it => (it.entity || '').toLowerCase() === entLower);
+    snippetExtractor = r => {
+      const matched = (r.items || []).filter(it => (it.entity || '').toLowerCase() === entLower);
+      // Highlight both the snippet AND the entity name itself in the review text
+      const out = matched.map(it => it.snippet).filter(Boolean);
+      out.push(state.entity);
+      return out;
+    };
+    headerTitle = `${d.short_name} — ${state.entity}`;
+    headerTag = 'Entity';
+    headerTagCls = 'pos';  // neutral-positive styling for entity tag
+  } else {
+    const cat = state.cat, sent = state.sent;
+    predicate = r => (r.items || []).some(it => it.category === cat && it.sentiment === sent);
+    snippetExtractor = r => (r.items || [])
+      .filter(it => it.category === cat && it.sentiment === sent)
+      .map(it => it.snippet).filter(Boolean);
+    headerTitle = `${d.short_name} — ${CAT_LABEL[cat] || cat}`;
+    headerTag = sent === 'positive' ? 'Strength' : 'Focus area';
+    headerTagCls = sent === 'positive' ? 'pos' : 'neg';
+  }
+
+  const allReviews = (d.absa_reviews || []).filter(r => r.items && predicate(r));
+  const all = allReviews.filter(r => dateInRange(r.date, range));
+  const totalAllTime = allReviews.length;
+
+  const outOfRangeNote = totalAllTime > all.length
+    ? ` · <span style="color:#fbbf24;">${totalAllTime - all.length} hidden by time filter</span>`
+    : '';
+
+  const slice = all.slice(0, visible);
+  const cards = slice.length === 0
+    ? `<div style="color:#94a3b8;font-size:0.82rem;padding:14px;text-align:center;">${
+        totalAllTime > 0
+          ? `No reviews in this time range. ${totalAllTime} exist outside the range.`
+          : 'No reviews match this for this outlet.'
+      }</div>`
+    : slice.map(r => {
+        const snippets = snippetExtractor(r);
+        const stars = '★'.repeat(Math.round(r.rating || 0)) + '☆'.repeat(5 - Math.round(r.rating || 0));
+        const when = r.date || r.time || '';
+        return `<div class="review-card">
+          <div class="rc-meta"><span class="stars">${stars}</span><span>${when}</span></div>
+          <div class="rc-text">${snippetHL(r.text, snippets)}</div>
+        </div>`;
+      }).join('');
+
+  const moreBtn = visible < all.length
+    ? `<button class="load-more-btn" data-place="${dealerIdx}" data-rv-action="loadmore">Load 10 more</button>`
+    : '<span style="color:#64748b;font-size:0.74rem;">All loaded</span>';
+
+  return `<div class="popup-content">
+    <div class="rv-header">
+      <button class="rv-back" data-place="${dealerIdx}" data-rv-action="back">← Back</button>
+      <div class="rv-title">${headerTitle}</div>
+      <span class="rv-tag ${headerTagCls}">${headerTag}</span>
+    </div>
+    <div class="rv-meta">${d.city}${d.district && d.district !== d.city ? ' · ' + d.district : ''} · ${all.length} review${all.length===1?'':'s'} in range${outOfRangeNote}</div>
+    <div class="rv-body">${cards}</div>
+    <div class="rv-footer">
+      <span class="rv-count">Showing ${slice.length} of ${all.length}</span>
+      ${moreBtn}
+    </div>
+  </div>`;
+}
+
+// Click delegation: cat-row → category mode, ent-row → entity mode, back → exit.
+document.addEventListener('click', (e) => {
+  const jump = e.target.closest('[data-place-jump]');
+  if (jump) {
+    e.stopPropagation();
+    const idx = Number(jump.dataset.placeJump);
+    if (dealerMarkers[idx] && dealerMarkers[idx].marker) {
+      // Reset any reviews-mode state on the target so it opens fresh in overview
+      delete popupViewState[idx];
+      map.closePopup();
+      dealerMarkers[idx].marker.openPopup();
+    }
+    return;
+  }
+  const catRow = e.target.closest('.cat-row[data-place]');
+  if (catRow && !catRow.classList.contains('empty')) {
+    e.stopPropagation();
+    const idx = Number(catRow.dataset.place);
+    popupViewState[idx] = {
+      mode: 'category',
+      cat: catRow.dataset.cat,
+      sent: catRow.dataset.sent,
+      visible: 5,
+    };
+    dealerMarkers[idx].marker.setPopupContent(buildReviewsPopupContent(idx, getRange()));
+    return;
+  }
+  const entRow = e.target.closest('.ent-row[data-place]');
+  if (entRow) {
+    e.stopPropagation();
+    const idx = Number(entRow.dataset.place);
+    popupViewState[idx] = {
+      mode: 'entity',
+      entity: entRow.dataset.entity,
+      visible: 5,
+    };
+    dealerMarkers[idx].marker.setPopupContent(buildReviewsPopupContent(idx, getRange()));
+    return;
+  }
+  const back = e.target.closest('[data-rv-action="back"]');
+  if (back) {
+    e.stopPropagation();
+    const idx = Number(back.dataset.place);
+    delete popupViewState[idx];
+    render();
+    return;
+  }
+  const more = e.target.closest('[data-rv-action="loadmore"]');
+  if (more) {
+    e.stopPropagation();
+    const idx = Number(more.dataset.place);
+    if (popupViewState[idx]) {
+      popupViewState[idx].visible += 10;
+      dealerMarkers[idx].marker.setPopupContent(buildReviewsPopupContent(idx, getRange()));
+    }
+    return;
+  }
+});
+
+// When the leaflet popup closes (click X, click map, click another marker),
+// drop any per-marker reviews-mode state so it reopens fresh in overview.
+map.on('popupclose', (ev) => {
+  const idx = dealerMarkers.findIndex(x => x.marker === ev.layer);
+  if (idx >= 0) delete popupViewState[idx];
+});
+</script>
+
+<script id="js13">
+// ===== Custom range + initial render =====
+const YEARS = DASHBOARD_DATA.meta.years_present.map(Number);
+function fillYearMonth(yId, mId, defY, defM) {
+  const ys = document.getElementById(yId), ms = document.getElementById(mId);
+  YEARS.forEach(y => { const o=document.createElement('option'); o.value=y; o.textContent=y; if (y===defY) o.selected=true; ys.appendChild(o); });
+  MONTHS.forEach((m,i) => { const o=document.createElement('option'); o.value=i+1; o.textContent=m; if (i+1===defM) o.selected=true; ms.appendChild(o); });
+}
+fillYearMonth('from-year','from-month', DEFAULT_YEAR, 1);
+fillYearMonth('to-year','to-month', DEFAULT_YEAR, 12);
+document.querySelectorAll('#custom-range-wrap select').forEach(el => el.addEventListener('change', render));
+
+// ===== Initial Render =====
+populateCityList();
+updateCityLabel();
+populateDistrictList();
+updateDistrictLabel();
+populateCatsList();
+updateCatsLabel();
+updateTypeLabel();
+updateLayersLabel();
+refreshLegend();
+render();
+</script>
+</body>
+</html>
