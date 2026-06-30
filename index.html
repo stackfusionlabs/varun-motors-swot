@@ -2657,7 +2657,31 @@ render();
     delete popupViewState[i];
     map.closePopup();
     map.flyTo([entry.data.lat, entry.data.lng], Math.max(map.getZoom(), 11), { duration: 0.6 });
-    setTimeout(() => entry.marker.openPopup(), 650);
+    setTimeout(() => {
+      entry.marker.openPopup();
+      // A1a: after popup is in the DOM, pan the map so the entire popup fits.
+      // Two ticks: one for openPopup to attach, another for layout to settle.
+      requestAnimationFrame(() => requestAnimationFrame(() => ensurePopupInView(entry.marker)));
+    }, 650);
+  }
+  function ensurePopupInView(marker) {
+    const popup = marker.getPopup && marker.getPopup();
+    const el    = popup && popup.getElement && popup.getElement();
+    if (!el) return;
+    const pad     = 16;
+    const pRect   = el.getBoundingClientRect();
+    const mRect   = map.getContainer().getBoundingClientRect();
+    // Positive overflow = popup clips outside the map viewport on that edge.
+    const overTop    = (mRect.top    + pad) - pRect.top;
+    const overBottom = pRect.bottom  - (mRect.bottom - pad);
+    const overLeft   = (mRect.left   + pad) - pRect.left;
+    const overRight  = pRect.right   - (mRect.right  - pad);
+    let dx = 0, dy = 0;
+    if (overTop    > 0) dy = -overTop;        // popup above viewport → pan view up
+    else if (overBottom > 0) dy = overBottom; // popup below viewport → pan view down
+    if (overLeft   > 0) dx = -overLeft;
+    else if (overRight  > 0) dx = overRight;
+    if (dx || dy) map.panBy([dx, dy], { animate: true, duration: 0.4 });
   }
   function describeDealer(d) {
     const range = (typeof getRange === 'function') ? getRange() : null;
