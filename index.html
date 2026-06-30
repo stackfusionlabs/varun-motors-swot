@@ -229,6 +229,36 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 .ins-card .ic-body { font-size: 0.82rem; line-height: 1.5; color: #cbd5e1; }
 .ins-card .ic-body em { color: #fbbf24; font-style: normal; font-weight: 600; }
 .ins-empty { color: #64748b; font-size: 0.82rem; font-style: italic; padding: 10px 0; }
+/* ===== Drishti — conversational AI bot ===== */
+#drishti-fab { position: fixed; bottom: 22px; right: 22px; width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, #3b82f6, #1d4ed8); border: 2px solid rgba(255,255,255,0.18); color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 8px 24px rgba(59,130,246,0.45), 0 2px 6px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 5000; transition: transform 0.18s, box-shadow 0.18s; }
+#drishti-fab:hover { transform: scale(1.06); box-shadow: 0 10px 32px rgba(59,130,246,0.6), 0 2px 8px rgba(0,0,0,0.6); }
+#drishti-fab.listening { background: linear-gradient(135deg, #ef4444, #b91c1c); animation: drishti-pulse 1.4s ease-in-out infinite; }
+@keyframes drishti-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55), 0 8px 24px rgba(239,68,68,0.45); } 50% { box-shadow: 0 0 0 18px rgba(239,68,68,0), 0 8px 24px rgba(239,68,68,0.45); } }
+#drishti-overlay { position: fixed; bottom: 92px; right: 22px; width: 340px; max-height: 60vh; background: #0f172a; border: 1px solid #475569; border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,0.7); padding: 14px 16px; z-index: 5000; display: none; flex-direction: column; gap: 10px; }
+#drishti-overlay.open { display: flex; }
+#drishti-overlay .d-header { display: flex; align-items: center; justify-content: space-between; }
+#drishti-overlay .d-title { font-size: 0.92rem; font-weight: 700; color: #e2e8f0; display: flex; align-items: center; gap: 8px; }
+#drishti-overlay .d-title .d-dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+#drishti-overlay.live .d-title .d-dot { background: #ef4444; animation: drishti-pulse-dot 1.2s ease-in-out infinite; }
+@keyframes drishti-pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+#drishti-overlay .d-close { background: none; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 2px 6px; }
+#drishti-overlay .d-close:hover { color: #e2e8f0; }
+#drishti-overlay .d-transcript { font-size: 0.82rem; color: #cbd5e1; min-height: 24px; padding: 8px 10px; background: #1e293b; border-radius: 6px; border-left: 3px solid #475569; }
+#drishti-overlay.live .d-transcript { border-left-color: #ef4444; }
+#drishti-overlay .d-transcript .d-interim { color: #64748b; font-style: italic; }
+#drishti-overlay .d-answer { font-size: 0.82rem; color: #e2e8f0; padding: 8px 10px; background: #1e293b; border-radius: 6px; border-left: 3px solid #3b82f6; line-height: 1.45; }
+#drishti-overlay .d-answer:empty { display: none; }
+#drishti-overlay .d-hints { font-size: 0.7rem; color: #64748b; padding-top: 4px; border-top: 1px solid #334155; }
+#drishti-overlay .d-hints b { color: #94a3b8; }
+#drishti-overlay .d-bars { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 22px; }
+#drishti-overlay .d-bars span { width: 3px; background: #ef4444; border-radius: 2px; transform-origin: bottom; animation: drishti-bar 1s ease-in-out infinite; }
+#drishti-overlay .d-bars span:nth-child(1) { animation-delay: 0.0s; height: 60%; }
+#drishti-overlay .d-bars span:nth-child(2) { animation-delay: 0.1s; height: 100%; }
+#drishti-overlay .d-bars span:nth-child(3) { animation-delay: 0.2s; height: 80%; }
+#drishti-overlay .d-bars span:nth-child(4) { animation-delay: 0.3s; height: 100%; }
+#drishti-overlay .d-bars span:nth-child(5) { animation-delay: 0.4s; height: 60%; }
+@keyframes drishti-bar { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+#drishti-overlay:not(.live) .d-bars { display: none; }
 </style>
 </head>
 <body>
@@ -2463,6 +2493,183 @@ updateTypeLabel();
 updateLayersLabel();
 refreshLegend();
 render();
+</script>
+<!-- ===== Drishti — conversational AI bot (Phase A1: click-to-talk) ===== -->
+<button id="drishti-fab" title="Talk to Drishti" aria-label="Open Drishti voice assistant">🎤</button>
+<div id="drishti-overlay" role="dialog" aria-label="Drishti voice assistant">
+  <div class="d-header">
+    <div class="d-title"><span class="d-dot"></span><span>Drishti</span></div>
+    <button class="d-close" aria-label="Close">×</button>
+  </div>
+  <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
+  <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
+  <div class="d-answer" id="drishti-answer"></div>
+  <div class="d-hints"><b>Try:</b> "show me Marripalem" · "open Madhapur Nexa" · "find Gajuwaka Arena"</div>
+</div>
+<script id="drishti-bot">
+// =============================================================================
+// Drishti — Phase A1
+// Click-to-talk via WebSpeech API. Intent: "show me/open/find {outlet name}".
+// Resolves the spoken outlet name against DASHBOARD_DATA.dealers, opens the
+// matching popup, speaks back a one-line summary. No AI/LLM yet — pure
+// fuzzy-match + template, so 100% deterministic and 0 hallucination risk.
+// Phases B+ swap WebSpeech for whisper.cpp WASM and add more intents.
+// =============================================================================
+(function () {
+  const fab        = document.getElementById('drishti-fab');
+  const overlay    = document.getElementById('drishti-overlay');
+  const closeBtn   = overlay.querySelector('.d-close');
+  const transcript = document.getElementById('drishti-transcript');
+  const answerEl   = document.getElementById('drishti-answer');
+
+  // ----- TTS: pick an Indian-English voice when available -----
+  let ttsVoice = null;
+  function pickVoice() {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    ttsVoice = voices.find(v => /en[-_]IN/i.test(v.lang))
+            || voices.find(v => /india|indian/i.test(v.name))
+            || voices.find(v => /^en/i.test(v.lang))
+            || voices[0];
+  }
+  if ('speechSynthesis' in window) {
+    pickVoice();
+    speechSynthesis.onvoiceschanged = pickVoice;
+  }
+  function speak(text) {
+    if (!('speechSynthesis' in window)) return;
+    try { speechSynthesis.cancel(); } catch(e) {}
+    const u = new SpeechSynthesisUtterance(text);
+    if (ttsVoice) u.voice = ttsVoice;
+    u.rate = 1.02; u.pitch = 1.0;
+    speechSynthesis.speak(u);
+  }
+
+  // ----- STT: WebSpeech (Phase A) — swap for whisper.cpp WASM in Phase B -----
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, listening = false;
+
+  function ensureRecog() {
+    if (!SR) return null;
+    if (recog) return recog;
+    recog = new SR();
+    recog.lang = 'en-IN';
+    recog.interimResults = true;
+    recog.continuous = false;
+    recog.maxAlternatives = 3;
+    recog.onstart  = () => setListening(true);
+    recog.onend    = () => setListening(false);
+    recog.onerror  = (e) => { setListening(false); if (e.error !== 'no-speech') showAnswer(`Mic error: ${e.error}`); };
+    recog.onresult = (e) => {
+      let interim = '', final = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) final += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      if (interim) transcript.innerHTML = `<span class="d-interim">${escapeHtml(interim)}</span>`;
+      if (final) {
+        transcript.textContent = final.trim();
+        handleUtterance(final.trim());
+      }
+    };
+    return recog;
+  }
+  function startListening() {
+    if (!SR) {
+      openOverlay();
+      showAnswer('Speech recognition is not supported in this browser. Chrome, Edge, and Safari (recent) all work.');
+      return;
+    }
+    openOverlay();
+    answerEl.textContent = '';
+    transcript.textContent = 'Listening…';
+    try { ensureRecog().start(); } catch (e) { /* already started */ }
+  }
+  function stopListening() { try { recog && recog.stop(); } catch(e) {} }
+  function setListening(on) {
+    listening = on;
+    fab.classList.toggle('listening', on);
+    overlay.classList.toggle('live', on);
+  }
+
+  // ----- Overlay open/close -----
+  function openOverlay()  { overlay.classList.add('open'); }
+  function closeOverlay() { overlay.classList.remove('open'); stopListening(); }
+  fab.addEventListener('click', () => {
+    if (overlay.classList.contains('open') && !listening) { closeOverlay(); return; }
+    startListening();
+  });
+  closeBtn.addEventListener('click', closeOverlay);
+
+  // ----- Intent: "show me/open/find {outlet}" (A1 only — more in A2/A3) -----
+  // Normalise: lowercase, strip non-alphanum, collapse spaces.
+  function norm(s) { return (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  // Token-overlap score: how many query tokens hit the candidate.
+  function scoreMatch(queryTokens, candidate) {
+    const c = norm(candidate);
+    if (!c) return 0;
+    let hits = 0;
+    queryTokens.forEach(t => { if (t.length >= 3 && c.includes(t)) hits++; });
+    return hits;
+  }
+  function findOutlet(query) {
+    const q = norm(query);
+    if (!q) return null;
+    // Strip leading verbs: "show me", "open", "find", "go to", "take me to"
+    const stripped = q.replace(/^(please\s+)?(can you\s+)?(show( me)?|open|find|go to|take me to|navigate to|jump to|pull up|where is)\s+/i, '').trim();
+    const tokens = stripped.split(' ').filter(t => t.length >= 3);
+    if (!tokens.length) return null;
+    let best = null, bestScore = 0;
+    (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
+      const candFields = [
+        d.short_name, d.city, d.district || '',
+        DIV_LABEL[d.division] || d.division, d.name,
+      ].join(' ');
+      const s = scoreMatch(tokens, candFields);
+      if (s > bestScore) { bestScore = s; best = { i, d }; }
+    });
+    return bestScore >= 1 ? best : null;
+  }
+  function openDealer(i) {
+    const entry = dealerMarkers[i];
+    if (!entry) return;
+    delete popupViewState[i];
+    map.closePopup();
+    map.flyTo([entry.data.lat, entry.data.lng], Math.max(map.getZoom(), 11), { duration: 0.6 });
+    setTimeout(() => entry.marker.openPopup(), 650);
+  }
+  function describeDealer(d) {
+    const range = (typeof getRange === 'function') ? getRange() : null;
+    const eff = (typeof effectiveScore === 'function' && range) ? effectiveScore(d, range) : null;
+    const scoreTxt = eff && eff.score != null ? (typeof fmtScore5 === 'function' ? fmtScore5(eff.score) : eff.score.toFixed(1)) : null;
+    const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    if (scoreTxt == null) return `Here is ${d.short_name}, a ${where}. No reviews captured yet in the current range.`;
+    const gmap = d.gmaps_rating != null ? ` Google rating ${d.gmaps_rating.toFixed(1)} from ${d.gmaps_total_reviews || '?'} reviews.` : '';
+    return `Here is ${d.short_name}, a ${where}. Pulse score ${scoreTxt} out of plus or minus 5.${gmap}`;
+  }
+  function showAnswer(text) {
+    answerEl.textContent = text;
+    speak(text);
+  }
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // ----- The router -----
+  function handleUtterance(text) {
+    const q = (text || '').trim();
+    if (!q) return;
+    // A1 intent: show/open/find/jump/where {outlet}
+    if (/\b(show|open|find|go to|take me to|navigate|jump|pull up|where)\b/i.test(q) || /\bvarun|maruti|arena|nexa\b/i.test(q)) {
+      const match = findOutlet(q);
+      if (match) {
+        openDealer(match.i);
+        showAnswer(describeDealer(match.d));
+        return;
+      }
+    }
+    showAnswer(`Sorry, I did not find a match for "${q}". Try saying an outlet name like Gajuwaka or Marripalem.`);
+  }
+})();
 </script>
 </body>
 </html>
