@@ -2522,27 +2522,99 @@ render();
   const transcript = document.getElementById('drishti-transcript');
   const answerEl   = document.getElementById('drishti-answer');
 
-  // ----- TTS: pick an Indian-English voice when available -----
+  // ----- TTS: prefer an Indian-English FEMALE voice (Drishti is feminine) -----
   let ttsVoice = null;
+  // Female-voice name hints across OSes/browsers. Order is preference.
+  const FEMALE_HINTS = [
+    /\b(veena|isha|raveena|priya|kavya|shilpa)\b/i,           // Indian female TTS (macOS, Google, Android)
+    /\bgoogle\s+(hindi|english\s+\(india\))\s*$/i,             // Google Hindi often defaults female
+    /\b(samantha|karen|kate|tessa|fiona|moira|serena|allison|ava|joanna|emma|amy|salli|kendra|ivy|joelle|nicole)\b/i,
+    /\bfemale\b/i,
+    /\b(zira|hazel|susan|catherine|linda|heather)\b/i          // Windows female SAPI voices
+  ];
+  const MALE_HINTS = /\b(male|rishi|ravi|deepak|alex|daniel|fred|tom|david|mark|george|aaron|matthew|justin|bruce|guy|james)\b/i;
+  function voiceIsFemale(v) {
+    return FEMALE_HINTS.some(rx => rx.test(v.name)) && !MALE_HINTS.test(v.name);
+  }
   function pickVoice() {
     const voices = speechSynthesis.getVoices();
     if (!voices.length) return;
-    ttsVoice = voices.find(v => /en[-_]IN/i.test(v.lang))
-            || voices.find(v => /india|indian/i.test(v.name))
-            || voices.find(v => /^en/i.test(v.lang))
-            || voices[0];
+    const enIN = voices.filter(v => /en[-_]IN/i.test(v.lang));
+    const en   = voices.filter(v => /^en/i.test(v.lang));
+    ttsVoice =
+        enIN.find(voiceIsFemale)                                  // best: en-IN female
+     || enIN.find(v => !MALE_HINTS.test(v.name)) || enIN[0]       // any en-IN
+     || en.find(voiceIsFemale)                                    // fallback: any-English female
+     || en.find(v => !MALE_HINTS.test(v.name)) || en[0]
+     || voices[0];
   }
   if ('speechSynthesis' in window) {
     pickVoice();
     speechSynthesis.onvoiceschanged = pickVoice;
   }
+  let isSpeaking = false;
   function speak(text) {
     if (!('speechSynthesis' in window)) return;
     try { speechSynthesis.cancel(); } catch(e) {}
     const u = new SpeechSynthesisUtterance(text);
     if (ttsVoice) u.voice = ttsVoice;
-    u.rate = 1.02; u.pitch = 1.0;
+    u.rate = 1.02; u.pitch = 1.05;       // slight pitch lift reinforces female timbre on default voices
+    u.onstart = () => { isSpeaking = true;  startBargeInListener(); };
+    u.onend   = () => { isSpeaking = false; stopBargeInListener();  };
+    u.onerror = () => { isSpeaking = false; stopBargeInListener();  };
     speechSynthesis.speak(u);
+  }
+  // ----- Barge-in: stop talking the instant the user starts talking -----
+  // Uses WebAudio + an RMS volume gate. Cheap, no extra model needed.
+  // (Phase B will swap this for whisper.cpp's built-in VAD.)
+  let bargeStream = null, bargeCtx = null, bargeAnalyser = null, bargeRAF = 0;
+  const BARGE_THRESHOLD = 0.035;     // RMS gate; raise if room noise triggers it
+  const BARGE_SUSTAIN_MS = 120;      // sustained loudness needed before we cut TTS
+  let bargeLoudSince = 0;
+  async function startBargeInListener() {
+    if (bargeStream) return;
+    try {
+      bargeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      bargeCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const src = bargeCtx.createMediaStreamSource(bargeStream);
+      bargeAnalyser = bargeCtx.createAnalyser();
+      bargeAnalyser.fftSize = 1024;
+      src.connect(bargeAnalyser);
+      const buf = new Float32Array(bargeAnalyser.fftSize);
+      const tick = () => {
+        if (!bargeAnalyser) return;
+        bargeAnalyser.getFloatTimeDomainData(buf);
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+        const rms = Math.sqrt(sumSq / buf.length);
+        const now = performance.now();
+        if (rms > BARGE_THRESHOLD) {
+          if (!bargeLoudSince) bargeLoudSince = now;
+          if (now - bargeLoudSince >= BARGE_SUSTAIN_MS && isSpeaking) {
+            // User is speaking over Drishti — cut TTS, hand back to STT.
+            try { speechSynthesis.cancel(); } catch(e) {}
+            isSpeaking = false;
+            stopBargeInListener();
+            // Restart STT so we capture what they're saying.
+            startListening();
+            return;
+          }
+        } else {
+          bargeLoudSince = 0;
+        }
+        bargeRAF = requestAnimationFrame(tick);
+      };
+      bargeRAF = requestAnimationFrame(tick);
+    } catch (e) {
+      // Mic permission denied or unavailable — barge-in disabled, TTS still works.
+    }
+  }
+  function stopBargeInListener() {
+    if (bargeRAF) cancelAnimationFrame(bargeRAF);
+    bargeRAF = 0; bargeLoudSince = 0;
+    if (bargeAnalyser) { try { bargeAnalyser.disconnect(); } catch(e) {} bargeAnalyser = null; }
+    if (bargeCtx)      { try { bargeCtx.close(); }           catch(e) {} bargeCtx      = null; }
+    if (bargeStream)   { bargeStream.getTracks().forEach(t => t.stop()); bargeStream  = null; }
   }
 
   // ----- STT: WebSpeech (Phase A) — swap for whisper.cpp WASM in Phase B -----
