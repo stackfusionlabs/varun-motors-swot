@@ -2624,32 +2624,46 @@ render();
 
   // ----- Intent: "show me/open/find {outlet}" (A1 only — more in A2/A3) -----
   // Normalise: lowercase, strip non-alphanum, collapse spaces.
+  // Stop words: stripped from queries so leftover content tokens are the
+  // actual place/brand words. "vijayawada city" → ["vijayawada"].
+  const DRISHTI_STOP_WORDS = new Set([
+    'the','please','can','you','tell','about','locate','take','jump','pull','navigate',
+    'show','open','find','where','here','this','that','one','some','any',
+    'city','town','place','area','outlet','branch','location','showroom','dealer','store','center','centre','main'
+  ]);
   function norm(s) { return (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
-  // Token-overlap score: how many query tokens hit the candidate.
+  function toContentTokens(s) {
+    return norm(s).split(' ').filter(t => t.length >= 3 && !DRISHTI_STOP_WORDS.has(t));
+  }
   function scoreMatch(queryTokens, candidate) {
     const c = norm(candidate);
     if (!c) return 0;
     let hits = 0;
-    queryTokens.forEach(t => { if (t.length >= 3 && c.includes(t)) hits++; });
+    queryTokens.forEach(t => { if (c.includes(t)) hits++; });
     return hits;
   }
   function findOutlet(query) {
-    const q = norm(query);
-    if (!q) return null;
-    // Strip leading verbs: "show me", "open", "find", "go to", "take me to"
-    const stripped = q.replace(/^(please\s+)?(can you\s+)?(show( me)?|open|find|go to|take me to|navigate to|jump to|pull up|where is)\s+/i, '').trim();
-    const tokens = stripped.split(' ').filter(t => t.length >= 3);
+    const tokens = toContentTokens(query);
     if (!tokens.length) return null;
-    let best = null, bestScore = 0;
+    // Collect every dealer that matches at the top score — ties are real
+    // (a city like Vijayawada has multiple Varun outlets). We tie-break by
+    // review volume so the "main" outlet wins by default.
+    let bestScore = 0;
+    const ranked = [];
     (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
       const candFields = [
         d.short_name, d.city, d.district || '',
         DIV_LABEL[d.division] || d.division, d.name,
       ].join(' ');
       const s = scoreMatch(tokens, candFields);
-      if (s > bestScore) { bestScore = s; best = { i, d }; }
+      if (s === 0) return;
+      if (s > bestScore) { bestScore = s; ranked.length = 0; }
+      if (s === bestScore) ranked.push({ i, d });
     });
-    return bestScore >= 1 ? best : null;
+    if (!ranked.length) return null;
+    ranked.sort((a, b) => (b.d.reviews_total || 0) - (a.d.reviews_total || 0));
+    const winner = ranked[0];
+    return { ...winner, alternates: ranked.slice(1, 4).map(r => r.d.short_name) };
   }
   function openDealer(i) {
     const entry = dealerMarkers[i];
@@ -2702,16 +2716,20 @@ render();
   function handleUtterance(text) {
     const q = (text || '').trim();
     if (!q) return;
-    // A1 intent: show/open/find/jump/where {outlet}
-    if (/\b(show|open|find|go to|take me to|navigate|jump|pull up|where)\b/i.test(q) || /\bvarun|maruti|arena|nexa\b/i.test(q)) {
-      const match = findOutlet(q);
-      if (match) {
-        openDealer(match.i);
-        showAnswer(describeDealer(match.d));
-        return;
+    // A1: any utterance with at least one content token is treated as a
+    // place-name lookup. Bare names like "Vijayawada" or "Gajuwaka Arena"
+    // work without a verb prefix.
+    const match = findOutlet(q);
+    if (match) {
+      openDealer(match.i);
+      let line = describeDealer(match.d);
+      if (match.alternates && match.alternates.length) {
+        line += ` Other matches: ${match.alternates.join(', ')}.`;
       }
+      showAnswer(line);
+      return;
     }
-    showAnswer(`Sorry, I did not find a match for "${q}". Try saying an outlet name like Gajuwaka or Marripalem.`);
+    showAnswer(`Sorry, I did not find a match for "${q}". Try an outlet, city, or division like "Gajuwaka", "Vijayawada Nexa", or "Madhapur service".`);
   }
 })();
 </script>
