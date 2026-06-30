@@ -250,6 +250,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #drishti-overlay .d-answer:empty { display: none; }
 #drishti-overlay .d-hints { font-size: 0.7rem; color: #64748b; padding-top: 4px; border-top: 1px solid #334155; }
 #drishti-overlay .d-hints b { color: #94a3b8; }
+#drishti-overlay .d-voice-row { display: flex; align-items: center; gap: 8px; font-size: 0.7rem; color: #94a3b8; }
+#drishti-overlay .d-voice-row label { font-weight: 600; }
+#drishti-overlay .d-voice-row select { flex: 1; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; font-size: 0.72rem; font-family: inherit; cursor: pointer; }
+#drishti-overlay .d-voice-row select:focus { outline: 1px solid #3b82f6; }
 #drishti-overlay .d-bars { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 22px; }
 #drishti-overlay .d-bars span { width: 3px; background: #ef4444; border-radius: 2px; transform-origin: bottom; animation: drishti-bar 1s ease-in-out infinite; }
 #drishti-overlay .d-bars span:nth-child(1) { animation-delay: 0.0s; height: 60%; }
@@ -2501,6 +2505,10 @@ render();
     <div class="d-title"><span class="d-dot"></span><span>Drishti</span></div>
     <button class="d-close" aria-label="Close">×</button>
   </div>
+  <div class="d-voice-row">
+    <label for="drishti-voice-select">Voice</label>
+    <select id="drishti-voice-select" title="Pick a TTS voice (♀ = detected female, ♂ = detected male)"></select>
+  </div>
   <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
   <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
   <div class="d-answer" id="drishti-answer"></div>
@@ -2522,99 +2530,76 @@ render();
   const transcript = document.getElementById('drishti-transcript');
   const answerEl   = document.getElementById('drishti-answer');
 
-  // ----- TTS: prefer an Indian-English FEMALE voice (Drishti is feminine) -----
+  // ----- TTS: prefer an Indian-English FEMALE voice, with user override -----
   let ttsVoice = null;
-  // Female-voice name hints across OSes/browsers. Order is preference.
+  let allEnglishVoices = [];
   const FEMALE_HINTS = [
-    /\b(veena|isha|raveena|priya|kavya|shilpa)\b/i,           // Indian female TTS (macOS, Google, Android)
-    /\bgoogle\s+(hindi|english\s+\(india\))\s*$/i,             // Google Hindi often defaults female
-    /\b(samantha|karen|kate|tessa|fiona|moira|serena|allison|ava|joanna|emma|amy|salli|kendra|ivy|joelle|nicole)\b/i,
+    /\b(veena|isha|raveena|priya|kavya|shilpa|aditi|leela)\b/i,
+    /\bgoogle\s+(hindi|english\s+\(india\))\s*$/i,
+    /\b(samantha|karen|kate|tessa|fiona|moira|serena|allison|ava|joanna|emma|amy|salli|kendra|ivy|joelle|nicole|victoria)\b/i,
     /\bfemale\b/i,
-    /\b(zira|hazel|susan|catherine|linda|heather)\b/i          // Windows female SAPI voices
+    /\b(zira|hazel|susan|catherine|linda|heather|eva)\b/i
   ];
-  const MALE_HINTS = /\b(male|rishi|ravi|deepak|alex|daniel|fred|tom|david|mark|george|aaron|matthew|justin|bruce|guy|james)\b/i;
+  const MALE_HINTS = /\b(male|rishi|ravi|deepak|alex|daniel|fred|tom|david|mark|george|aaron|matthew|justin|bruce|guy|james|gordon|lee|oliver)\b/i;
   function voiceIsFemale(v) {
     return FEMALE_HINTS.some(rx => rx.test(v.name)) && !MALE_HINTS.test(v.name);
   }
   function pickVoice() {
     const voices = speechSynthesis.getVoices();
     if (!voices.length) return;
-    const enIN = voices.filter(v => /en[-_]IN/i.test(v.lang));
-    const en   = voices.filter(v => /^en/i.test(v.lang));
+    allEnglishVoices = voices.filter(v => /^en/i.test(v.lang));
+    // Honour saved choice if it still exists.
+    const saved = localStorage.getItem('drishti.voice');
+    if (saved) {
+      const hit = allEnglishVoices.find(v => v.name === saved);
+      if (hit) { ttsVoice = hit; renderVoicePicker(); return; }
+    }
+    const enIN = allEnglishVoices.filter(v => /en[-_]IN/i.test(v.lang));
     ttsVoice =
-        enIN.find(voiceIsFemale)                                  // best: en-IN female
-     || enIN.find(v => !MALE_HINTS.test(v.name)) || enIN[0]       // any en-IN
-     || en.find(voiceIsFemale)                                    // fallback: any-English female
-     || en.find(v => !MALE_HINTS.test(v.name)) || en[0]
+        enIN.find(voiceIsFemale)
+     || allEnglishVoices.find(voiceIsFemale)
+     || enIN[0]
+     || allEnglishVoices[0]
      || voices[0];
+    renderVoicePicker();
+  }
+  function renderVoicePicker() {
+    const sel = document.getElementById('drishti-voice-select');
+    if (!sel || !allEnglishVoices.length) return;
+    sel.innerHTML = allEnglishVoices.map(v => {
+      const fem = voiceIsFemale(v) ? ' ♀' : (MALE_HINTS.test(v.name) ? ' ♂' : '');
+      const sel = (ttsVoice && v.name === ttsVoice.name) ? ' selected' : '';
+      return `<option value="${v.name}"${sel}>${v.name} [${v.lang}]${fem}</option>`;
+    }).join('');
   }
   if ('speechSynthesis' in window) {
     pickVoice();
     speechSynthesis.onvoiceschanged = pickVoice;
   }
+  function setVoiceByName(name) {
+    const hit = allEnglishVoices.find(v => v.name === name);
+    if (!hit) return;
+    ttsVoice = hit;
+    localStorage.setItem('drishti.voice', name);
+    // Speak a one-word confirmation so the user hears the change.
+    try { speechSynthesis.cancel(); } catch(e) {}
+    const u = new SpeechSynthesisUtterance('Hello, I am Drishti.');
+    u.voice = ttsVoice; u.rate = 1.02; u.pitch = 1.05;
+    speechSynthesis.speak(u);
+  }
   let isSpeaking = false;
-  function speak(text) {
+  let autoResumeAfterSpeak = false;
+  function speak(text, { resumeAfter = false } = {}) {
+    autoResumeAfterSpeak = resumeAfter;
     if (!('speechSynthesis' in window)) return;
     try { speechSynthesis.cancel(); } catch(e) {}
     const u = new SpeechSynthesisUtterance(text);
     if (ttsVoice) u.voice = ttsVoice;
-    u.rate = 1.02; u.pitch = 1.05;       // slight pitch lift reinforces female timbre on default voices
-    u.onstart = () => { isSpeaking = true;  startBargeInListener(); };
-    u.onend   = () => { isSpeaking = false; stopBargeInListener();  };
-    u.onerror = () => { isSpeaking = false; stopBargeInListener();  };
+    u.rate = 1.02; u.pitch = 1.05;
+    u.onstart = () => { isSpeaking = true;  };
+    u.onend   = () => { isSpeaking = false; if (autoResumeAfterSpeak) startListening(); };
+    u.onerror = () => { isSpeaking = false; };
     speechSynthesis.speak(u);
-  }
-  // ----- Barge-in: stop talking the instant the user starts talking -----
-  // Uses WebAudio + an RMS volume gate. Cheap, no extra model needed.
-  // (Phase B will swap this for whisper.cpp's built-in VAD.)
-  let bargeStream = null, bargeCtx = null, bargeAnalyser = null, bargeRAF = 0;
-  const BARGE_THRESHOLD = 0.035;     // RMS gate; raise if room noise triggers it
-  const BARGE_SUSTAIN_MS = 120;      // sustained loudness needed before we cut TTS
-  let bargeLoudSince = 0;
-  async function startBargeInListener() {
-    if (bargeStream) return;
-    try {
-      bargeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      bargeCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = bargeCtx.createMediaStreamSource(bargeStream);
-      bargeAnalyser = bargeCtx.createAnalyser();
-      bargeAnalyser.fftSize = 1024;
-      src.connect(bargeAnalyser);
-      const buf = new Float32Array(bargeAnalyser.fftSize);
-      const tick = () => {
-        if (!bargeAnalyser) return;
-        bargeAnalyser.getFloatTimeDomainData(buf);
-        let sumSq = 0;
-        for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
-        const rms = Math.sqrt(sumSq / buf.length);
-        const now = performance.now();
-        if (rms > BARGE_THRESHOLD) {
-          if (!bargeLoudSince) bargeLoudSince = now;
-          if (now - bargeLoudSince >= BARGE_SUSTAIN_MS && isSpeaking) {
-            // User is speaking over Drishti — cut TTS, hand back to STT.
-            try { speechSynthesis.cancel(); } catch(e) {}
-            isSpeaking = false;
-            stopBargeInListener();
-            // Restart STT so we capture what they're saying.
-            startListening();
-            return;
-          }
-        } else {
-          bargeLoudSince = 0;
-        }
-        bargeRAF = requestAnimationFrame(tick);
-      };
-      bargeRAF = requestAnimationFrame(tick);
-    } catch (e) {
-      // Mic permission denied or unavailable — barge-in disabled, TTS still works.
-    }
-  }
-  function stopBargeInListener() {
-    if (bargeRAF) cancelAnimationFrame(bargeRAF);
-    bargeRAF = 0; bargeLoudSince = 0;
-    if (bargeAnalyser) { try { bargeAnalyser.disconnect(); } catch(e) {} bargeAnalyser = null; }
-    if (bargeCtx)      { try { bargeCtx.close(); }           catch(e) {} bargeCtx      = null; }
-    if (bargeStream)   { bargeStream.getTracks().forEach(t => t.stop()); bargeStream  = null; }
   }
 
   // ----- STT: WebSpeech (Phase A) — swap for whisper.cpp WASM in Phase B -----
@@ -2693,6 +2678,8 @@ render();
     startListening();
   });
   closeBtn.addEventListener('click', closeOverlay);
+  const voiceSelectEl = document.getElementById('drishti-voice-select');
+  if (voiceSelectEl) voiceSelectEl.addEventListener('change', e => setVoiceByName(e.target.value));
 
   // ----- Intent: "show me/open/find {outlet}" (A1 only — more in A2/A3) -----
   // Normalise: lowercase, strip non-alphanum, collapse spaces.
@@ -2778,9 +2765,9 @@ render();
     const gmap = d.gmaps_rating != null ? ` Google rating ${d.gmaps_rating.toFixed(1)} from ${d.gmaps_total_reviews || '?'} reviews.` : '';
     return `Here is ${d.short_name}, a ${where}. Pulse score ${scoreTxt} out of plus or minus 5.${gmap}`;
   }
-  function showAnswer(text) {
+  function showAnswer(text, { resumeAfter = true } = {}) {
     answerEl.textContent = text;
-    speak(text);
+    speak(text, { resumeAfter });
   }
   function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
