@@ -2559,7 +2559,27 @@ render();
     recog.maxAlternatives = 3;
     recog.onstart  = () => setListening(true);
     recog.onend    = () => setListening(false);
-    recog.onerror  = (e) => { setListening(false); if (e.error !== 'no-speech') showAnswer(`Mic error: ${e.error}`); };
+    recog.onerror  = (e) => {
+      setListening(false);
+      if (e.error === 'no-speech') return;
+      // Map cryptic WebSpeech errors to actionable messages.
+      const friendly = {
+        'service-not-allowed':
+          "Your browser blocked the speech service. " +
+          "If you're on Brave, lower Shields for this site. " +
+          "If on Safari/Firefox, switch to Chrome or Edge. " +
+          "Phase B (offline whisper.cpp) will remove this dependency.",
+        'not-allowed':
+          "Microphone permission was denied. Click the 🔒 icon in the address bar and allow microphone access for this site.",
+        'audio-capture':
+          "No microphone found. Check your audio input device.",
+        'network':
+          "Speech service unreachable — check your internet connection. (Phase B will fix this offline.)",
+        'aborted':
+          "Listening was cancelled."
+      };
+      showAnswer(friendly[e.error] || `Mic error: ${e.error}`);
+    };
     recog.onresult = (e) => {
       let interim = '', final = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
