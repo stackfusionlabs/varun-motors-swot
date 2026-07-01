@@ -2959,42 +2959,82 @@ render();
     }
     return { ...winner, alternates };
   }
-  // ----- P0.1: phonetic fuzzy fallback (for STT mishears like "dorangi" for
-  // "Turangi", "tandoor" for "Tandur", "tagaru" for "Tagarapuvalasa"). Only
-  // fires when strict findOutlet returns null — cheap enough (~136 dealers ×
-  // few targets), zero deps.
-  function bigramsOf(s) {
-    const clean = norm(s).replace(/\s+/g, '');
-    const out = new Set();
-    for (let i = 0; i < clean.length - 1; i++) out.add(clean.slice(i, i+2));
-    return out;
-  }
-  function dice(aSet, bSet) {
-    if (!aSet.size || !bSet.size) return 0;
-    let inter = 0; for (const x of aSet) if (bSet.has(x)) inter++;
-    return (2 * inter) / (aSet.size + bSet.size);
-  }
-  function fuzzyFindOutlet(query) {
-    const tokens = toContentTokens(query);
-    if (!tokens.length) return null;
-    let best = { s: 0, i: -1, d: null };
-    (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
-      const targets = [d.short_name, d.city, d.district].filter(Boolean);
-      for (const t of targets) {
-        const tb = bigramsOf(t);
-        const tFirstWord = norm(t).split(' ')[0];
-        for (const tok of tokens) {
-          const tokb = bigramsOf(tok);
-          let s = dice(tokb, tb);
-          // Prefix boost: "tagaru" (first 4 = "taga") matches Tagarapuvalasa
-          // (first word "tagarapuvalasa" starts "taga") → bump to 0.6.
-          if (tok.length >= 4 && tFirstWord.length >= 4 &&
-              tFirstWord.slice(0, 4) === tok.slice(0, 4)) s = Math.max(s, 0.62);
-          if (s > best.s) best = { s, i, d };
-        }
+  // ----- Phonetic fuzzy fallback (for STT mishears / typos like "dorangi" for
+  // "Turangi", "tandoor" for "Tandur", "gaju vaka" for "Gajuwaka"). Uses
+  // Jaro-Winkler, which is built for name matching and survives phonetic
+  // garbling far better than bigram overlap. Fires when strict findOutlet is
+  // null; ~136 dealers × few targets, zero deps.
+  function jaro(a, b) {
+    if (a === b) return 1;
+    const la = a.length, lb = b.length;
+    if (!la || !lb) return 0;
+    const maxDist = Math.floor(Math.max(la, lb) / 2) - 1;
+    const ma = new Array(la).fill(false), mb = new Array(lb).fill(false);
+    let matches = 0;
+    for (let i = 0; i < la; i++) {
+      const start = Math.max(0, i - maxDist), end = Math.min(i + maxDist + 1, lb);
+      for (let j = start; j < end; j++) {
+        if (mb[j] || a[i] !== b[j]) continue;
+        ma[i] = true; mb[j] = true; matches++; break;
       }
+    }
+    if (!matches) return 0;
+    let t = 0, k = 0;
+    for (let i = 0; i < la; i++) {
+      if (!ma[i]) continue;
+      while (!mb[k]) k++;
+      if (a[i] !== b[k]) t++;
+      k++;
+    }
+    t /= 2;
+    return (matches / la + matches / lb + (matches - t) / matches) / 3;
+  }
+  function jaroWinkler(a, b) {
+    a = norm(a).replace(/\s+/g, ''); b = norm(b).replace(/\s+/g, '');
+    const j = jaro(a, b);
+    let p = 0; while (p < 4 && p < a.length && p < b.length && a[p] === b[p]) p++;
+    return j + p * 0.1 * (1 - j);
+  }
+  // Words that are never outlet names — don't let them fuzzy-match a dealer.
+  const FUZZY_STOP = new Set([
+    'good','great','best','worst','review','reviews','rating','ratings','feedback',
+    'people','feel','things','stuff','give','details','what','which','have','many','worse'
+  ]);
+  function isNameToken(t) {
+    if (FUZZY_STOP.has(t)) return false;
+    if (ASPECT_MAP[t] || COMPLAINT_RX.test(t)) return false;
+    if (AGG_BEST.test(t) || AGG_WORST.test(t) || AGG_COUNT.test(t)) return false;
+    return true;
+  }
+  // Rank all dealers by best Jaro-Winkler similarity of the query (both the
+  // joined name-tokens for multiword mishears like "marry palam"→"Marripalem",
+  // and each token individually for "... in dorangi") against short_name/city/district.
+  function nearestOutlets(query, k) {
+    const tokens = toContentTokens(query).filter(isNameToken);
+    if (!tokens.length) return [];
+    const joined = tokens.join('');
+    const scored = (DASHBOARD_DATA.dealers || []).map((d, i) => {
+      let s = 0;
+      // Match against the full short_name/city/district AND the individual
+      // words of a multi-word short_name, so "Nexa Turangi" is reachable as
+      // "turangi" and a division prefix doesn't drown the real name.
+      const targets = [d.short_name, d.city, d.district].filter(Boolean);
+      for (const w of norm(d.short_name || '').split(' ')) if (w.length >= 4) targets.push(w);
+      for (const target of targets) {
+        let cs = jaroWinkler(joined, target);
+        for (const tok of tokens) { const v = jaroWinkler(tok, target); if (v > cs) cs = v; }
+        if (cs > s) s = cs;
+      }
+      return { i, d, s };
     });
-    return best.s >= 0.55 ? best : null;
+    scored.sort((a, b) => b.s - a.s);
+    return scored.slice(0, k);
+  }
+  const FUZZY_MATCH_MIN = 0.80;   // confident enough to open the outlet
+  const FUZZY_HINT_MIN  = 0.62;   // close enough to suggest as "did you mean"
+  function fuzzyFindOutlet(query) {
+    const near = nearestOutlets(query, 1);
+    return (near.length && near[0].s >= FUZZY_MATCH_MIN) ? near[0] : null;
   }
   function openDealer(i) {
     const entry = dealerMarkers[i];
@@ -3192,6 +3232,29 @@ render();
     return null;
   }
   function respondAspectForCity(aspectKey, isComplaint, cityTitle, list) {
+    // No specific aspect but a complaint/"worst" query → city-wide top
+    // complaints + weakest outlet (handles "worst place in Vizag").
+    if (!aspectKey) {
+      if (isComplaint) {
+        const negAgg = {};
+        let worst = null;
+        for (const { d, i } of list) {
+          const s = pulseOf(d);
+          if (s != null && (!worst || s < worst.s)) worst = { d, i, s };
+          for (const m of (d.absa_top_mentions || [])) {
+            if (m.sentiment === 'negative') negAgg[m.text] = (negAgg[m.text] || 0) + (m.count || 1);
+          }
+        }
+        const top = Object.entries(negAgg).sort((a, b) => b[1] - a[1]).slice(0, 3)
+          .map(([t, c]) => `"${t}" (${c}×)`);
+        let line = top.length
+          ? `Top complaints across ${cityTitle}: ${top.join(', ')}.`
+          : `No specific complaints captured across ${cityTitle}.`;
+        if (worst) line += ` Weakest outlet: ${worst.d.short_name}, pulse ${fmtPulse(worst.s)}.`;
+        return line;
+      }
+      return `Which aspect? Try "staff in ${cityTitle}" or "service in ${cityTitle}".`;
+    }
     // Aggregate the aspect across all outlets in the city.
     let pos = 0, neg = 0, weighted = 0, weight = 0, bestOutlet = null, worstOutlet = null;
     for (const { d } of list) {
@@ -3314,19 +3377,23 @@ render();
       showAnswer(line);
       return;
     }
-    // P0.1: phonetic fuzzy fallback — catch STT mishears.
-    const fuzzy = fuzzyFindOutlet(q);
-    if (fuzzy) {
-      openDealer(fuzzy.i);
-      showAnswer(`Did you mean ${fuzzy.d.short_name}? ${describeDealer(fuzzy.d)}`);
+    // Phonetic fuzzy fallback — catch STT mishears / typos.
+    const near = nearestOutlets(q, 3);
+    if (near.length && near[0].s >= FUZZY_MATCH_MIN) {
+      openDealer(near[0].i);
+      showAnswer(`Did you mean ${near[0].d.short_name}? ${describeDealer(near[0].d)}`);
       return;
     }
+    // Nothing crossed the match bar — but if a few names are close, name them
+    // so Drishti shows it knows the outlet vocabulary instead of a blank miss.
+    const hints = [...new Set(near.filter(x => x.s >= FUZZY_HINT_MIN).map(x => x.d.short_name))].slice(0, 3);
+    const suffix = hints.length ? ` Closest names I know: ${hints.join(', ')}.` : '';
     const misses = [
       `Hmm, I couldn't place "${q}". Try an outlet like "Gajuwaka" or a city like "Vizag".`,
       `Not sure about "${q}". You can ask "best in Hyderabad" or "how many in Vijayawada".`,
       `"${q}" didn't ring a bell. Try a Varun Motors outlet, city, or "top in <city>".`
     ];
-    showAnswer(misses[Math.floor(q.length) % misses.length]);
+    showAnswer(misses[q.length % misses.length] + suffix);
   }
 })();
 </script>
