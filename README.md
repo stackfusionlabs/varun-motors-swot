@@ -47,13 +47,20 @@ whole speech loop (STT → intent → response → TTS) is on-device.
 Regenerate `dashboard_data.js` locally (the ETL scripts live outside this repo),
 commit it, and push — Vercel redeploys on push to `main`.
 
-## Drishti architecture (three-tier)
+## Drishti architecture
 
-| Tier | Runs when | Size | Latency |
-|---|---|---|---|
-| 1. Rules + fuzzy match | always first | 0 MB | 0 ms |
-| 2. MiniLM embeddings | Tier 1 confidence < 0.7 | ~22 MB | ~50 ms |
-| 3. Llama-3.2-1B (WebLLM) | Tiers 1+2 both low | ~800 MB | 500 ms |
+Two selectable "brains" in the overlay:
 
-Speech is `Xenova/whisper-base.en` quantized (~90 MB) via transformers.js.
-TTS is the browser's `SpeechSynthesis` (uses OS voices, zero download).
+| Brain | How it answers | Best for |
+|---|---|---|
+| **Rules** | Deterministic intent match + fuzzy (Jaro-Winkler) name resolution | Exact, instant lookups — outlet/city/aspect/counts |
+| **Drishti AI** | Grounded RAG: resolves the outlet/city, hands **only** those facts to an offline Llama-3.2-1B (WebGPU), which phrases the answer | Natural, free-form questions ("what's better between X and Y") |
+
+The LLM is **grounded** — it never sees the full dataset and is instructed to
+use only the facts it's given, so it phrases naturally without inventing numbers.
+
+Speech-to-text: `Xenova/whisper-base.en` quantized (~90 MB) or WebSpeech.
+Text-to-speech: the browser's `SpeechSynthesis` (OS voices, zero download).
+
+First LLM load fetches ~880 MB of model shards once (from `models/` locally, or
+CDN + browser cache). After that, **airplane mode works**.

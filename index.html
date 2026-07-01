@@ -2520,6 +2520,14 @@ render();
     </select>
     <span id="drishti-engine-status" class="d-engine-status"></span>
   </div>
+  <div class="d-voice-row">
+    <label for="drishti-brain-select">Brain</label>
+    <select id="drishti-brain-select" title="How Drishti understands and answers">
+      <option value="rules">Rules (instant, exact)</option>
+      <option value="llm">Drishti AI (offline LLM)</option>
+    </select>
+    <span id="drishti-brain-status" class="d-engine-status"></span>
+  </div>
   <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
   <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
   <div class="d-answer" id="drishti-answer"></div>
@@ -2817,6 +2825,75 @@ render();
     return { transcribe, recordUntilSilence, stop, isReady };
   })();
 
+  // ---- Tier-3 offline LLM (WebLLM / Llama-3.2-1B, WebGPU) ----
+  // Grounded RAG: we resolve the outlet/city deterministically, hand the model
+  // ONLY those facts, and ask it to phrase an answer. The model never sees the
+  // full dataset and is told to use only the given facts — so it phrases
+  // naturally without inventing numbers.
+  const llm = (function () {
+    let engine = null;
+    let loading = null;
+    const MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
+    const LIB_NAME = 'Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm';
+
+    async function loadRuntime() {
+      const attempts = ['./js/vendor/web-llm.js', 'https://esm.run/@mlc-ai/web-llm@0.2.79'];
+      let mod = null, err = null;
+      for (const u of attempts) { try { mod = await import(u); break; } catch (e) { err = e; } }
+      if (!mod) throw new Error('web-llm unavailable: ' + (err && err.message));
+      return mod;
+    }
+
+    // App config pointing model + lib at local files (served by http.server).
+    function localAppConfig() {
+      return {
+        model_list: [{
+          model: './models/mlc-ai/' + MODEL_ID + '/',
+          model_id: MODEL_ID,
+          model_lib: './js/vendor/' + LIB_NAME,
+          overrides: { context_window_size: 4096 }
+        }]
+      };
+    }
+
+    async function ensureEngine(setStatus) {
+      if (engine) return engine;
+      if (loading) return loading;
+      loading = (async () => {
+        const webllm = await loadRuntime();
+        setStatus('Loading Drishti AI — first time only, ~1 min…', 'warn');
+        const onProg = (r) => setStatus((r && r.text) ? r.text : 'loading…', 'warn');
+        let eng;
+        try {
+          // Prefer fully-local (offline) model + lib.
+          eng = await webllm.CreateMLCEngine(MODEL_ID, { appConfig: localAppConfig(), initProgressCallback: onProg });
+        } catch (e) {
+          // Local files missing/blocked → fall back to WebLLM's built-in config
+          // (fetches from CDN once, then browser-cached; airplane mode after).
+          console.warn('[llm] local config failed, using default:', e);
+          setStatus('Local model not found — fetching once from CDN…', 'warn');
+          eng = await webllm.CreateMLCEngine(MODEL_ID, { initProgressCallback: onProg });
+        }
+        engine = eng;
+        setStatus('Drishti AI ready', 'ok');
+        return engine;
+      })();
+      return loading;
+    }
+
+    async function generate(system, user, setStatus) {
+      const eng = await ensureEngine(setStatus);
+      const res = await eng.chat.completions.create({
+        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+        temperature: 0.2,
+        max_tokens: 180
+      });
+      return (res.choices[0].message.content || '').trim();
+    }
+
+    return { generate, isReady: () => !!engine, warmup: (setStatus) => ensureEngine(setStatus) };
+  })();
+
   async function startListeningWhisper() {
     openOverlay();
     answerEl.textContent = '';
@@ -2871,6 +2948,29 @@ render();
       sttEngine = e.target.value;
       localStorage.setItem('drishti.stt', sttEngine);
       if (engineStatusEl) engineStatusEl.textContent = '';
+    });
+  }
+
+  // ----- Brain picker (Rules vs offline LLM) -----
+  let brainMode = localStorage.getItem('drishti.brain') || 'rules';
+  const brainSelectEl = document.getElementById('drishti-brain-select');
+  const brainStatusEl = document.getElementById('drishti-brain-status');
+  if (brainSelectEl) {
+    brainSelectEl.value = brainMode;
+    brainSelectEl.addEventListener('change', e => {
+      brainMode = e.target.value;
+      localStorage.setItem('drishti.brain', brainMode);
+      if (brainMode === 'llm') {
+        // Pre-warm so the first question isn't cold (big win for a live demo).
+        const setStatus = (m, c) => {
+          if (!brainStatusEl) return;
+          brainStatusEl.textContent = m || '';
+          brainStatusEl.className = 'd-engine-status' + (c ? ' ' + c : '');
+        };
+        llm.warmup(setStatus).catch(err => setStatus((err && err.message) || 'load failed', 'warn'));
+      } else if (brainStatusEl) {
+        brainStatusEl.textContent = '';
+      }
     });
   }
 
@@ -3282,15 +3382,133 @@ render();
     return "I'm Drishti — Varun Motors' offline voice assistant. I can find outlets, cities, and aspect feedback. Try: 'Gajuwaka', 'best in Vizag', 'how many Arena in Vijayawada', 'how are staff in Ringroad', or 'top complaints in Marripalem'.";
   }
 
+  // ----- Tier-3 grounded RAG: resolve entities → compact facts → LLM phrasing -----
+  const ASPECT_ORDER = ['staff', 'service', 'delivery', 'pricing', 'ambiance', 'followup'];
+  function fmtDealerFacts(d) {
+    const pulse = pulseOf(d);
+    const cats = d.absa_categories || {};
+    const aspectStr = ASPECT_ORDER.filter(k => cats[k]).map(k => {
+      const c = cats[k];
+      return `${k} ${c.score}/10 (${c.pos || 0} positive, ${c.neg || 0} negative)`;
+    }).join('; ');
+    const pos = (d.absa_top_mentions || []).filter(m => m.sentiment === 'positive').slice(0, 3).map(m => `"${m.text}"`).join(', ');
+    const neg = (d.absa_top_mentions || []).filter(m => m.sentiment === 'negative').slice(0, 3).map(m => `"${m.text}"`).join(', ');
+    const div = DIV_LABEL[d.division] || d.division;
+    return [
+      `${d.short_name} — ${div} in ${d.city}${d.district ? ', ' + d.district + ' district' : ''}.`,
+      pulse != null ? `Pulse score ${fmtPulse(pulse)} on a -5 to +5 scale.` : 'No pulse score in the current range.',
+      d.gmaps_rating != null ? `Google rating ${d.gmaps_rating.toFixed(1)} of 5 from ${d.gmaps_total_reviews || '?'} reviews.` : '',
+      aspectStr ? `Aspect scores (out of 10): ${aspectStr}.` : '',
+      pos ? `Most praised: ${pos}.` : '',
+      neg ? `Complaints: ${neg}.` : 'No notable complaints captured.'
+    ].filter(Boolean).join(' ');
+  }
+  function fmtCityFacts(cityTitle, list) {
+    const scored = list.map(x => ({ d: x.d, s: pulseOf(x.d) })).filter(x => x.s != null).sort((a, b) => b.s - a.s);
+    const top = scored.slice(0, 3).map(x => `${x.d.short_name} (${DIV_LABEL[x.d.division]}, ${fmtPulse(x.s)})`).join(', ');
+    const bottom = scored.slice(-3).reverse().map(x => `${x.d.short_name} (${DIV_LABEL[x.d.division]}, ${fmtPulse(x.s)})`).join(', ');
+    return `${cityTitle} has ${list.length} Varun Motors outlets (${divBreakdown(list)}). Highest pulse: ${top || 'n/a'}. Lowest pulse: ${bottom || 'n/a'}.`;
+  }
+  function globalOverviewFacts() {
+    const byCity = {};
+    (DASHBOARD_DATA.dealers || []).forEach(d => { byCity[d.city] = (byCity[d.city] || 0) + 1; });
+    const top = Object.entries(byCity).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      .map(([c, n]) => `${c} (${n})`).join(', ');
+    return `Varun Motors runs ${(DASHBOARD_DATA.dealers || []).length} outlets across Andhra Pradesh and Telangana. Largest presence: ${top}.`;
+  }
+  // Resolve the query to the relevant record(s) and build a compact fact block.
+  function buildLLMContext(query) {
+    // Comparison: "X vs Y", "between X and Y", "X or Y".
+    const parts = query.split(/\b(?:versus|vs|compared to|compare|between|and|or)\b/i)
+      .map(s => s.trim()).filter(s => s.length > 2);
+    if (parts.length >= 2) {
+      const found = [];
+      for (const p of parts) {
+        const m = findOutlet(p) || fuzzyFindOutlet(p);
+        if (m && !found.some(f => f.i === m.i)) found.push(m);
+      }
+      if (found.length >= 2) {
+        return { scope: 'compare', matches: found, facts: found.map(f => fmtDealerFacts(f.d)).join('\n') };
+      }
+    }
+    // City.
+    const cityKey = findCityInQuery(query);
+    if (cityKey) {
+      const list = dealersInCity(cityKey);
+      if (list.length === 1) {
+        return { scope: 'outlet', match: list[0], facts: fmtDealerFacts(list[0].d) };
+      }
+      if (list.length) {
+        const cityTitle = list[0].d.city;
+        let facts = fmtCityFacts(cityTitle, list);
+        const aspectKey = detectAspect(query);
+        if (aspectKey) {
+          const ranked = list.map(x => ({ d: x.d, c: (x.d.absa_categories || {})[aspectKey] }))
+            .filter(x => x.c).sort((a, b) => b.c.score - a.c.score);
+          if (ranked.length) {
+            facts += `\n${aspectKey} score by outlet: ` +
+              ranked.slice(0, 6).map(x => `${x.d.short_name} ${x.c.score}/10`).join(', ') +
+              (ranked.length > 6 ? ', and more' : '') + '.';
+          }
+        }
+        return { scope: 'city', list, cityTitle, facts };
+      }
+    }
+    // Single outlet.
+    const m = findOutlet(query) || fuzzyFindOutlet(query);
+    if (m) return { scope: 'outlet', match: m, facts: fmtDealerFacts(m.d) };
+    // Nothing resolved → global overview so the model can still be useful.
+    return { scope: 'none', facts: globalOverviewFacts() };
+  }
+
+  const DRISHTI_SYSTEM_PROMPT =
+    "You are Drishti, the voice analyst for Varun Motors, a Maruti Suzuki dealership group in Andhra Pradesh and Telangana, India. " +
+    "Answer the user's question using ONLY the facts provided to you. Be concise and conversational — 1 to 2 short sentences suitable for reading aloud. " +
+    "Pulse scores range from -5 (worst) to +5 (best); aspect scores are out of 10. " +
+    "Never invent outlet names, numbers, or facts that are not in the provided facts. If the facts don't answer the question, say you don't have that data.";
+
+  async function answerWithLLM(query) {
+    const setStatus = (m, c) => {
+      if (!brainStatusEl) return;
+      brainStatusEl.textContent = m || '';
+      brainStatusEl.className = 'd-engine-status' + (c ? ' ' + c : '');
+    };
+    const ctx = buildLLMContext(query);
+    // Move the map to match the resolved scope (so the visual tracks the answer).
+    if (ctx.scope === 'outlet' && ctx.match) openDealer(ctx.match.i);
+    else if (ctx.scope === 'city') zoomToDealers(ctx.list);
+    else if (ctx.scope === 'compare') zoomToDealers(ctx.matches);
+    const user = `Facts:\n${ctx.facts}\n\nQuestion: ${query}\n\nAnswer in 1-2 short spoken sentences using only the facts above.`;
+    try {
+      answerEl.textContent = llm.isReady() ? 'Thinking…' : 'Waking up Drishti AI…';
+      const out = await llm.generate(DRISHTI_SYSTEM_PROMPT, user, setStatus);
+      setStatus('Drishti AI ready', 'ok');
+      showAnswer(out || "I don't have that data.");
+    } catch (e) {
+      console.error('[llm]', e);
+      setStatus((e && e.message) ? e.message : 'AI error', 'warn');
+      // Graceful degrade: fall back to the deterministic rules engine.
+      showAnswer(`AI unavailable (${e && e.message ? e.message : 'error'}). Using rules instead.`);
+      setTimeout(() => handleUtteranceRules(query, norm(query)), 50);
+    }
+  }
+
   // ----- The router -----
   function handleUtterance(text) {
     const q = (text || '').trim();
     if (!q) return;
     const nq = norm(q);
 
-    // A4.a: greetings + goodbyes (short-circuit).
+    // Universal short-circuits (both brains): goodbye closes the overlay.
+    if (BYE_RX.test(q)) { showAnswer("Goodbye.", { resumeAfter: false }); return closeOverlay(); }
+    // LLM brain handles everything else conversationally.
+    if (brainMode === 'llm') return answerWithLLM(q);
+    return handleUtteranceRules(q, nq);
+  }
+
+  function handleUtteranceRules(q, nq) {
+    // A4.a: greeting (bye is handled by the caller for both brains).
     if (GREET_RX.test(q)) return showAnswer("Hello! I'm Drishti. Ask about an outlet, city, or say 'help' to see what I can do.");
-    if (BYE_RX.test(q))   { showAnswer("Goodbye.", { resumeAfter: false }); return closeOverlay(); }
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
 

@@ -184,30 +184,30 @@ def fetch_llm_shards() -> bool:
         if not download(url, dst):
             ok = False
 
-    # WebLLM's compiled WebGPU library (~5 MB). The URL path changes between
-    # WebLLM versions and MLC's binary repo has multiple layouts. Try several
-    # candidates; the browser can also fetch it at runtime if all fail here.
+    # WebLLM's compiled WebGPU library (~5 MB). The correct URL is baked into
+    # web-llm.js's prebuiltAppConfig: modelLibURLPrefix + modelVersion + name.
+    # For web-llm 0.2.79 that resolves to raw.githubusercontent (NOT huggingface,
+    # which is why the earlier huggingface.co attempt 401'd).
     LIB_REPO = "mlc-ai/binary-mlc-llm-libs"
+    LIB_NAME = "Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm"
     LIB_CANDIDATES = [
-        f"web-llm-models/v0_2_48/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        f"web-llm-models/v0_2_79/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
-        f"Llama-3.2-1B-Instruct/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        f"https://raw.githubusercontent.com/{LIB_REPO}/main/web-llm-models/v0_2_48/{LIB_NAME}",
+        f"https://huggingface.co/{LIB_REPO}/resolve/main/web-llm-models/v0_2_48/{LIB_NAME}",
     ]
-    lib_dst = MODELS / LIB_REPO / "Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm"
+    lib_dst = VENDOR / LIB_NAME
     if lib_dst.exists() and lib_dst.stat().st_size > 0:
         print(f"  ✓ {lib_dst.relative_to(ROOT)}  ({human(lib_dst.stat().st_size).strip()})  [cached]")
     else:
         lib_ok = False
-        for path in LIB_CANDIDATES:
-            url = f"https://huggingface.co/{LIB_REPO}/resolve/main/{path}"
+        for url in LIB_CANDIDATES:
             if download(url, lib_dst, optional=True):
                 if lib_dst.exists() and lib_dst.stat().st_size > 0:
                     lib_ok = True
                     break
         if not lib_ok:
-            print("  · WebGPU library not found under any known path.")
-            print("    OK for now — Tier-3 LLM lands in Phase 4; we'll pin the correct")
-            print("    URL then. Whisper + MiniLM + LLM shards are all ready.")
+            print("  · WebGPU library not fetched here — that's OK: the browser will")
+            print("    fetch it from WebLLM's default URL on first (online) load and")
+            print("    cache it. After that, airplane mode works.")
     return ok
 
 
