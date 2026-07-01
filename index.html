@@ -2692,29 +2692,39 @@ render();
   ]);
   function norm(s) { return (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
   function toContentTokens(s) {
-    return norm(s).split(' ').filter(t => t.length >= 3 && !DRISHTI_STOP_WORDS.has(t));
+    // Min length 4: drops noise like "red" (from "in red") that used to
+    // substring-match Kama**red**dy's district.
+    return norm(s).split(' ').filter(t => t.length >= 4 && !DRISHTI_STOP_WORDS.has(t));
   }
   // Match score = weighted per-field hit count.
-  // A token that appears in short_name is worth more than in district, so
-  // "Vijayawada" prefers an outlet actually named/located Vijayawada over
-  // one that only shares a district. Full-word matches beat substring hits.
+  // A token in short_name is worth more than in district, so "Vijayawada"
+  // prefers an outlet actually named/located Vijayawada over one that only
+  // shares a district. Full-word matches beat substring hits.
   const FIELD_WEIGHTS = { short_name: 6, city: 5, district: 2, division: 3, name: 1 };
-  function fieldHits(token, text) {
+  function fieldHitsAny(token, text) {
+    // Any-hit: whole-word (2) or substring (1). Used for short_name + city
+    // so partials like "Marripal" still find Marripalem.
     const t = norm(text);
     if (!t) return 0;
-    // \b works because norm() left only [a-z0-9 ].
-    if (new RegExp(`\\b${token}\\b`).test(t)) return 2;   // exact word
-    if (t.includes(token)) return 1;                       // substring
+    if (new RegExp(`\\b${token}\\b`).test(t)) return 2;
+    if (t.includes(token)) return 1;
     return 0;
+  }
+  function fieldHitsWhole(token, text) {
+    // Whole-word only. Used for district / division / long name so a stray
+    // token can't drag an unrelated outlet up via substring collision.
+    const t = norm(text);
+    if (!t) return 0;
+    return new RegExp(`\\b${token}\\b`).test(t) ? 2 : 0;
   }
   function scoreDealer(tokens, d) {
     let score = 0;
     for (const t of tokens) {
-      score += FIELD_WEIGHTS.short_name * fieldHits(t, d.short_name);
-      score += FIELD_WEIGHTS.city       * fieldHits(t, d.city);
-      score += FIELD_WEIGHTS.district   * fieldHits(t, d.district || '');
-      score += FIELD_WEIGHTS.division   * fieldHits(t, DIV_LABEL[d.division] || d.division);
-      score += FIELD_WEIGHTS.name       * fieldHits(t, d.name);
+      score += FIELD_WEIGHTS.short_name * fieldHitsAny(t, d.short_name);
+      score += FIELD_WEIGHTS.city       * fieldHitsAny(t, d.city);
+      score += FIELD_WEIGHTS.district   * fieldHitsWhole(t, d.district || '');
+      score += FIELD_WEIGHTS.division   * fieldHitsWhole(t, DIV_LABEL[d.division] || d.division);
+      score += FIELD_WEIGHTS.name       * fieldHitsWhole(t, d.name);
     }
     return score;
   }
@@ -2739,8 +2749,9 @@ render();
       return (divPriority[b.d.division] || 0) - (divPriority[a.d.division] || 0);
     });
     const winner = ranked[0];
-    // Build alternates with division suffix so "Ringroad, Ringroad" becomes
-    // "Ringroad Nexa, Ringroad Service".
+    // Build alternates. Skip appending the division word when the short_name
+    // already contains it (so "Nexa Turangi" stays "Nexa Turangi" instead of
+    // becoming "Nexa Turangi Nexa").
     const seen = new Set([`${winner.d.short_name}|${winner.d.division}`]);
     const alternates = [];
     for (const r of ranked.slice(1)) {
@@ -2748,10 +2759,49 @@ render();
       if (seen.has(key)) continue;
       seen.add(key);
       const div = DIV_LABEL[r.d.division] || r.d.division;
-      alternates.push(`${r.d.short_name} ${div}`);
+      const nameNorm = norm(r.d.short_name);
+      const alreadyHas = new RegExp(`\\b${norm(div)}\\b`).test(nameNorm);
+      alternates.push(alreadyHas ? r.d.short_name : `${r.d.short_name} ${div}`);
       if (alternates.length === 3) break;
     }
     return { ...winner, alternates };
+  }
+  // ----- P0.1: phonetic fuzzy fallback (for STT mishears like "dorangi" for
+  // "Turangi", "tandoor" for "Tandur", "tagaru" for "Tagarapuvalasa"). Only
+  // fires when strict findOutlet returns null — cheap enough (~136 dealers ×
+  // few targets), zero deps.
+  function bigramsOf(s) {
+    const clean = norm(s).replace(/\s+/g, '');
+    const out = new Set();
+    for (let i = 0; i < clean.length - 1; i++) out.add(clean.slice(i, i+2));
+    return out;
+  }
+  function dice(aSet, bSet) {
+    if (!aSet.size || !bSet.size) return 0;
+    let inter = 0; for (const x of aSet) if (bSet.has(x)) inter++;
+    return (2 * inter) / (aSet.size + bSet.size);
+  }
+  function fuzzyFindOutlet(query) {
+    const tokens = toContentTokens(query);
+    if (!tokens.length) return null;
+    let best = { s: 0, i: -1, d: null };
+    (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
+      const targets = [d.short_name, d.city, d.district].filter(Boolean);
+      for (const t of targets) {
+        const tb = bigramsOf(t);
+        const tFirstWord = norm(t).split(' ')[0];
+        for (const tok of tokens) {
+          const tokb = bigramsOf(tok);
+          let s = dice(tokb, tb);
+          // Prefix boost: "tagaru" (first 4 = "taga") matches Tagarapuvalasa
+          // (first word "tagarapuvalasa" starts "taga") → bump to 0.6.
+          if (tok.length >= 4 && tFirstWord.length >= 4 &&
+              tFirstWord.slice(0, 4) === tok.slice(0, 4)) s = Math.max(s, 0.62);
+          if (s > best.s) best = { s, i, d };
+        }
+      }
+    });
+    return best.s >= 0.55 ? best : null;
   }
   function openDealer(i) {
     const entry = dealerMarkers[i];
@@ -2808,7 +2858,8 @@ render();
   // Colloquial names → canonical city name in DASHBOARD_DATA.
   const CITY_ALIASES = {
     'vizag': 'visakhapatnam', 'vskp': 'visakhapatnam', 'waltair': 'visakhapatnam',
-    'hyd': 'hyderabad',
+    'viza': 'visakhapatnam', 'visakha': 'visakhapatnam',
+    'hyd': 'hyderabad', 'hyderabaad': 'hyderabad',
     'vij': 'vijayawada', 'bezawada': 'vijayawada',
     'skl': 'srikakulam',
     'vzm': 'vizianagaram'
@@ -2948,7 +2999,19 @@ render();
       showAnswer(line);
       return;
     }
-    showAnswer(`Sorry, I did not find a match for "${q}". Try an outlet or city like "Gajuwaka", "Visakhapatnam", or "best in Hyderabad".`);
+    // P0.1: phonetic fuzzy fallback — catch STT mishears.
+    const fuzzy = fuzzyFindOutlet(q);
+    if (fuzzy) {
+      openDealer(fuzzy.i);
+      showAnswer(`Did you mean ${fuzzy.d.short_name}? ${describeDealer(fuzzy.d)}`);
+      return;
+    }
+    const misses = [
+      `Hmm, I couldn't place "${q}". Try an outlet like "Gajuwaka" or a city like "Vizag".`,
+      `Not sure about "${q}". You can ask "best in Hyderabad" or "how many in Vijayawada".`,
+      `"${q}" didn't ring a bell. Try a Varun Motors outlet, city, or "top in <city>".`
+    ];
+    showAnswer(misses[Math.floor(q.length) % misses.length]);
   }
 })();
 </script>
