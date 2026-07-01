@@ -27,6 +27,10 @@ base
 gb_meta.json
 vahan_scrape_config
 
+# Drishti offline assets — downloaded once via scripts/download_drishti_models.py
+models/
+js/vendor/
+
 # Raw data + intermediate build artifacts (regenerated locally)
 reviews/
 build/
