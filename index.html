@@ -254,6 +254,9 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; colo
 #drishti-overlay .d-voice-row label { font-weight: 600; }
 #drishti-overlay .d-voice-row select { flex: 1; background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 4px; padding: 4px 6px; font-size: 0.72rem; font-family: inherit; cursor: pointer; }
 #drishti-overlay .d-voice-row select:focus { outline: 1px solid #3b82f6; }
+#drishti-overlay .d-engine-status { color: #64748b; font-size: 0.66rem; font-style: italic; }
+#drishti-overlay .d-engine-status.warn { color: #fbbf24; }
+#drishti-overlay .d-engine-status.ok { color: #4ade80; }
 #drishti-overlay .d-bars { display: flex; align-items: flex-end; justify-content: center; gap: 3px; height: 22px; }
 #drishti-overlay .d-bars span { width: 3px; background: #ef4444; border-radius: 2px; transform-origin: bottom; animation: drishti-bar 1s ease-in-out infinite; }
 #drishti-overlay .d-bars span:nth-child(1) { animation-delay: 0.0s; height: 60%; }
@@ -2509,6 +2512,14 @@ render();
     <label for="drishti-voice-select">Voice</label>
     <select id="drishti-voice-select" title="Pick a TTS voice (♀ = detected female, ♂ = detected male)"></select>
   </div>
+  <div class="d-voice-row">
+    <label for="drishti-engine-select">STT</label>
+    <select id="drishti-engine-select" title="Speech-to-text engine">
+      <option value="webspeech">WebSpeech (online, instant)</option>
+      <option value="whisper">Whisper (offline, ~2s)</option>
+    </select>
+    <span id="drishti-engine-status" class="d-engine-status"></span>
+  </div>
   <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
   <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
   <div class="d-answer" id="drishti-answer"></div>
@@ -2653,6 +2664,7 @@ render();
     return recog;
   }
   function startListening() {
+    if (sttEngine === 'whisper') return startListeningWhisper();
     if (!SR) {
       openOverlay();
       showAnswer('Speech recognition is not supported in this browser. Chrome, Edge, and Safari (recent) all work.');
@@ -2663,11 +2675,179 @@ render();
     transcript.textContent = 'Listening…';
     try { ensureRecog().start(); } catch (e) { /* already started */ }
   }
-  function stopListening() { try { recog && recog.stop(); } catch(e) {} }
+  function stopListening() {
+    try { recog && recog.stop(); } catch(e) {}
+    try { whisper.stop(); } catch(e) {}
+  }
   function setListening(on) {
     listening = on;
     fab.classList.toggle('listening', on);
     overlay.classList.toggle('live', on);
+  }
+
+  // ----- Phase 2: Whisper (offline STT via transformers.js) -----
+  // Lazy-loaded. Prefers ./js/vendor/ + ./models/ (fully offline demo path);
+  // silently falls back to jsdelivr + HuggingFace CDN for public Vercel users
+  // who don't have the bootstrap on their machine.
+  const whisper = (function () {
+    let T = null;                // transformers.js module
+    let transcriber = null;      // ASR pipeline
+    let currentCleanup = null;   // stop-hook for in-flight recording
+    let ready = false;
+
+    async function loadRuntime(setStatus) {
+      if (T) return T;
+      setStatus('Loading Whisper runtime…', 'warn');
+      // Try the ES module dynamic import from local first, then CDN.
+      const attempts = [
+        './js/vendor/transformers.min.js',
+        'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2'
+      ];
+      let lastErr = null;
+      for (const url of attempts) {
+        try { T = await import(url); break; }
+        catch (e) { lastErr = e; }
+      }
+      if (!T) throw new Error(`transformers.js unavailable: ${lastErr && lastErr.message}`);
+      const env = T.env;
+      env.localModelPath = './models/';
+      env.allowLocalModels = true;
+      env.allowRemoteModels = true;  // graceful CDN fallback for public users
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+        env.backends.onnx.wasm.wasmPaths = './js/vendor/';
+      }
+      return T;
+    }
+
+    async function ensureModel(setStatus) {
+      if (transcriber) return transcriber;
+      const mod = await loadRuntime(setStatus);
+      setStatus('Loading whisper-base.en…', 'warn');
+      transcriber = await mod.pipeline(
+        'automatic-speech-recognition',
+        'Xenova/whisper-base.en',
+        {
+          quantized: true,
+          progress_callback: (p) => {
+            if (!p || !p.status) return;
+            if (p.status === 'progress' && p.total) {
+              const pct = Math.min(100, Math.round((p.loaded / p.total) * 100));
+              setStatus(`${p.file || 'model'} ${pct}%`, 'warn');
+            } else if (p.status === 'ready') {
+              setStatus('Whisper ready', 'ok');
+            }
+          }
+        }
+      );
+      ready = true;
+      setStatus('Whisper ready', 'ok');
+      return transcriber;
+    }
+
+    // Record until 1.5s of silence (or 12s max), return 16kHz mono Float32.
+    async function recordUntilSilence({ onLevel } = {}) {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+        });
+      } catch (e) {
+        throw new Error('Mic permission denied. Click 🔒 in the address bar and allow microphone.');
+      }
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AC({ sampleRate: 16000 });
+      const source = audioCtx.createMediaStreamSource(stream);
+      const proc = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      const chunks = [];
+      const SILENCE_THRESH = 0.008;
+      const SILENCE_MS = 1500;
+      const MAX_MS = 12000;
+      const WARMUP_MS = 400;
+      const start = performance.now();
+      let lastLoudMs = start;
+      let stopped = false;
+
+      return new Promise((resolve, reject) => {
+        const finish = (reason) => {
+          if (stopped) return;
+          stopped = true;
+          try { proc.disconnect(); } catch(e) {}
+          try { source.disconnect(); } catch(e) {}
+          try { stream.getTracks().forEach(t => t.stop()); } catch(e) {}
+          try { audioCtx.close(); } catch(e) {}
+          currentCleanup = null;
+          const total = chunks.reduce((n, c) => n + c.length, 0);
+          if (!total) return reject(new Error('No audio captured.'));
+          const combined = new Float32Array(total);
+          let off = 0;
+          for (const c of chunks) { combined.set(c, off); off += c.length; }
+          resolve({ audio: combined, reason });
+        };
+        currentCleanup = () => finish('cancelled');
+
+        proc.onaudioprocess = (e) => {
+          if (stopped) return;
+          const input = e.inputBuffer.getChannelData(0);
+          chunks.push(new Float32Array(input));
+          let sum = 0;
+          for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+          const rms = Math.sqrt(sum / input.length);
+          if (onLevel) onLevel(rms);
+          const now = performance.now();
+          const elapsed = now - start;
+          if (rms > SILENCE_THRESH) lastLoudMs = now;
+          if (elapsed > WARMUP_MS && now - lastLoudMs > SILENCE_MS) finish('silence');
+          else if (elapsed > MAX_MS) finish('max');
+        };
+        source.connect(proc);
+        proc.connect(audioCtx.destination);
+      });
+    }
+
+    async function transcribe(audio, setStatus) {
+      const t = await ensureModel(setStatus);
+      setStatus('Transcribing…', 'warn');
+      const result = await t(audio, { language: 'english', task: 'transcribe' });
+      return (result && result.text ? result.text : '').trim();
+    }
+
+    function stop() { if (currentCleanup) currentCleanup(); }
+    function isReady() { return ready; }
+    return { transcribe, recordUntilSilence, stop, isReady };
+  })();
+
+  async function startListeningWhisper() {
+    openOverlay();
+    answerEl.textContent = '';
+    const setStatus = (msg, cls) => {
+      if (!engineStatusEl) return;
+      engineStatusEl.textContent = msg || '';
+      engineStatusEl.className = 'd-engine-status' + (cls ? ' ' + cls : '');
+    };
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showAnswer('Microphone API unavailable. Use Chrome / Edge / Safari on http://localhost.');
+      return;
+    }
+    setListening(true);
+    transcript.textContent = whisper.isReady()
+      ? 'Listening… speak now, I stop on silence.'
+      : 'Preparing Whisper (first time only)…';
+    try {
+      const { audio } = await whisper.recordUntilSilence();
+      setListening(false);
+      transcript.textContent = 'Transcribing…';
+      const text = await whisper.transcribe(audio, setStatus);
+      setStatus('Whisper ready', 'ok');
+      if (!text) { showAnswer("Didn't catch that. Try again."); return; }
+      transcript.textContent = text;
+      handleUtterance(text);
+    } catch (e) {
+      setListening(false);
+      console.error('[whisper]', e);
+      setStatus(e.message, 'warn');
+      showAnswer(`Whisper error: ${e.message}`);
+    }
   }
 
   // ----- Overlay open/close -----
@@ -2680,6 +2860,19 @@ render();
   closeBtn.addEventListener('click', closeOverlay);
   const voiceSelectEl = document.getElementById('drishti-voice-select');
   if (voiceSelectEl) voiceSelectEl.addEventListener('change', e => setVoiceByName(e.target.value));
+
+  // ----- STT engine picker (WebSpeech vs Whisper offline) -----
+  let sttEngine = localStorage.getItem('drishti.stt') || 'webspeech';
+  const engineSelectEl = document.getElementById('drishti-engine-select');
+  const engineStatusEl = document.getElementById('drishti-engine-status');
+  if (engineSelectEl) {
+    engineSelectEl.value = sttEngine;
+    engineSelectEl.addEventListener('change', e => {
+      sttEngine = e.target.value;
+      localStorage.setItem('drishti.stt', sttEngine);
+      if (engineStatusEl) engineStatusEl.textContent = '';
+    });
+  }
 
   // ----- Intent: "show me/open/find {outlet}" (A1 only — more in A2/A3) -----
   // Normalise: lowercase, strip non-alphanum, collapse spaces.
