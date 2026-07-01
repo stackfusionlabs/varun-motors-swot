@@ -3187,23 +3187,26 @@ render();
   const ASPECT_MAP = {
     staff: 'staff', employee: 'staff', employees: 'staff', sales: 'staff',
     salesperson: 'staff', team: 'staff', executive: 'staff', executives: 'staff',
-    service: 'service', servicing: 'service', workshop: 'service', repair: 'service',
-    mechanic: 'service', mechanics: 'service',
-    delivery: 'delivery', delivered: 'delivery', waiting: 'delivery', wait: 'delivery',
+    servicing: 'service_quality', workshop: 'service_quality', repair: 'service_quality',
+    mechanic: 'service_quality', mechanics: 'service_quality', quality: 'service_quality',
+    delivery: 'delivery', delivered: 'delivery',
+    wait: 'wait_time', waiting: 'wait_time',
     pricing: 'pricing', price: 'pricing', prices: 'pricing', cost: 'pricing',
     expensive: 'pricing', cheap: 'pricing',
     ambiance: 'ambiance', ambience: 'ambiance', atmosphere: 'ambiance',
     showroom: 'ambiance', environment: 'ambiance',
-    followup: 'followup', 'follow': 'followup', communication: 'followup',
+    followup: 'followup', 'follow': 'followup',
+    communication: 'communication', response: 'communication', responsive: 'communication',
+    clean: 'cleanliness', cleanliness: 'cleanliness', hygiene: 'cleanliness',
   };
   const COMPLAINT_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|weak|weakness|worst|bad)\b/;
   // "Hard" complaint words unambiguously mean feedback (not a best/worst ranking).
   // Bare "worst"/"weak" are excluded here so "three worst places" ranks outlets
   // instead of dumping complaints.
   const COMPLAINT_HARD_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|grievance|bad\s+things?)\b/;
-  const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(mvp|drishti|the\s+mvp)|details\s+of\s+mvp|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
+  const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(drishti|the\s+mvp|this\s+mvp|this\s+demo|this\s+tool)|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
   // Allow a trailing name/filler ("hi Drishti", "hello there") after the greeting.
-  const GREET_RX = /^(hi|hello|hey|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
+  const GREET_RX = /^(hi+|hey+|hay|hello+|helo|hii+|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
   // Allow any combination of farewell words in any order ("bye thank you", "thanks bye").
   const BYE_RX   = /^((bye|goodbye|thanks|thank\s+you|cheers)[\s,!.?-]*)+(drishti|drishthi)?[\s!.?]*$/i;
 
@@ -3222,7 +3225,7 @@ render();
     if (aspectKey) {
       const cat = cats[aspectKey];
       if (!cat || (!cat.pos && !cat.neg)) {
-        return `No captured feedback about ${aspectKey} at ${d.short_name} ${where}.`;
+        return `No captured feedback about ${pretty(aspectKey)} at ${d.short_name} ${where}.`;
       }
       const scoreTxt = cat.score != null ? ` Score ${cat.score.toFixed(1)} out of 10.` : '';
       const framed = isComplaint
@@ -3235,7 +3238,7 @@ render();
         .slice(0, 2)
         .map(m => `"${m.text}"`);
       const example = mentions.length ? ` Sample: ${mentions.join(', ')}.` : '';
-      return `${cap(aspectKey)} at ${d.short_name} ${where}: ${framed}.${scoreTxt}${example}`;
+      return `${cap(pretty(aspectKey))} at ${d.short_name} ${where}: ${framed}.${scoreTxt}${example}`;
     }
     // No specific aspect — but a complaint query fell through.
     if (isComplaint) {
@@ -3285,9 +3288,9 @@ render();
         if (!worstOutlet || cat.score < worstOutlet.s) worstOutlet = { d, s: cat.score };
       }
     }
-    if (!pos && !neg) return `No ${aspectKey} feedback captured across ${cityTitle}.`;
+    if (!pos && !neg) return `No ${pretty(aspectKey)} feedback captured across ${cityTitle}.`;
     const avg = weight ? (weighted / weight).toFixed(1) : '?';
-    let line = `${cap(aspectKey)} across ${cityTitle}: ${pos} positive vs ${neg} negative mentions, weighted score ${avg}/10.`;
+    let line = `${cap(pretty(aspectKey))} across ${cityTitle}: ${pos} positive vs ${neg} negative mentions, weighted score ${avg}/10.`;
     if (bestOutlet && worstOutlet && bestOutlet.d !== worstOutlet.d) {
       line += ` Best: ${bestOutlet.d.short_name} (${bestOutlet.s.toFixed(1)}). Weakest: ${worstOutlet.d.short_name} (${worstOutlet.s.toFixed(1)}).`;
     }
@@ -3306,7 +3309,7 @@ render();
     const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : NUM_WORDS[m[1]];
     return (n >= 1 && n <= 25) ? n : null;
   }
-  const COMPARE_RX  = /\b(compare|comparison|versus|vs|difference\s+between|better\s+between|which\s+is\s+better)\b/;
+  const COMPARE_RX  = /\b(compare|comparison|versus|vs|difference\s+between|better\s+between|which\s+is\s+better|better\s+or|worse\s+or|or\s+worse)\b/;
   const LOCATE_RX   = /\b(where\s+is|where'?s|which\s+city|what\s+city|in\s+which\s+city|located|location\s+of)\b/;
   const POSITIVE_RX = /\b(strength|strengths|good\s+things?|good\s+about|best\s+about|positives?|\bpros\b|highlights?|what'?s\s+good)\b/;
   const STATE_MAP   = { 'andhra pradesh': 'AP', 'andhra': 'AP', 'ap': 'AP', 'telangana': 'TG', 'telengana': 'TG', 'tg': 'TG', 'ts': 'TG' };
@@ -3319,18 +3322,12 @@ render();
   // Conversational memory: last resolved city, so "and the worst?" carries context.
   let lastCity = null;
 
-  function topScored(list, asc, n) {
-    const scored = list.map(x => ({ i: x.i, d: x.d, s: pulseOf(x.d) })).filter(x => x.s != null);
-    scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
-    return scored.slice(0, n);
-  }
-
   function respondPositiveForDealer(d) {
     const cats = d.absa_categories || {};
     const top = Object.entries(cats).filter(([k]) => k !== 'other')
       .map(([k, c]) => ({ k, score: c.score, pos: c.pos || 0 }))
       .filter(x => x.pos > 0).sort((a, b) => (b.score - a.score) || (b.pos - a.pos)).slice(0, 3);
-    const aspectStr = top.map(x => `${x.k} (${x.score}/10)`).join(', ');
+    const aspectStr = top.map(x => `${pretty(x.k)} (${x.score}/10)`).join(', ');
     const pos = (d.absa_top_mentions || []).filter(m => m.sentiment === 'positive').slice(0, 3).map(m => `"${m.text}"`).join(', ');
     const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
     if (!aspectStr && !pos) return `No standout positive feedback captured yet for ${d.short_name}, ${where}.`;
@@ -3340,7 +3337,8 @@ render();
     return line;
   }
   function respondPositiveForCity(cityTitle, list) {
-    const best = topScored(list, false, 1)[0];
+    const ranked = rankList(list);
+    const best = ranked.scored.slice().sort((a, b) => b.s - a.s)[0];
     const agg = {};
     for (const { d } of list) for (const [k, c] of Object.entries(d.absa_categories || {})) {
       if (k === 'other') continue;
@@ -3350,29 +3348,9 @@ render();
     }
     const bestAspect = Object.entries(agg).filter(([, v]) => v.n).map(([k, v]) => ({ k, s: v.w / v.n })).sort((a, b) => b.s - a.s)[0];
     let line = `${cityTitle}'s strengths:`;
-    if (best) line += ` top performer ${best.d.short_name} ${DIV_LABEL[best.d.division]} at pulse ${fmtPulse(best.s)}`;
-    if (bestAspect) line += `${best ? ',' : ''} strongest area is ${bestAspect.k} (${bestAspect.s.toFixed(1)}/10)`;
+    if (best) line += ` top performer ${best.d.short_name} ${DIV_LABEL[best.d.division]} at ${ranked.metricLabel} ${ranked.fmt(best.s)}`;
+    if (bestAspect) line += `${best ? ',' : ''} strongest area is ${pretty(bestAspect.k)} (${bestAspect.s.toFixed(1)}/10)`;
     return line + '.';
-  }
-
-  function handleCompare(q) {
-    const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|and|or|better\s+than)\b/i)
-      .map(s => s.trim()).filter(s => s.length > 2);
-    const found = [];
-    for (const p of parts) {
-      const m = findOutlet(p) || fuzzyFindOutlet(p);
-      if (m && !found.some(f => f.i === m.i)) found.push(m);
-      if (found.length === 2) break;
-    }
-    if (found.length < 2) return null;
-    const [a, b] = found;
-    zoomToDealers(found);
-    const sa = pulseOf(a.d), sb = pulseOf(b.d);
-    if (sa == null || sb == null) {
-      return `${a.d.short_name} is a ${DIV_LABEL[a.d.division]} in ${a.d.city}; ${b.d.short_name} is a ${DIV_LABEL[b.d.division]} in ${b.d.city}. Not enough review data to compare pulse.`;
-    }
-    const win = sa >= sb ? a : b, ws = Math.max(sa, sb), ls = Math.min(sa, sb);
-    return `${a.d.short_name} pulse ${fmtPulse(sa)} versus ${b.d.short_name} pulse ${fmtPulse(sb)}. ${win.d.short_name} is stronger by ${(ws - ls).toFixed(1)} points.`;
   }
 
   function handleLocate(q) {
@@ -3397,6 +3375,118 @@ render();
     return null;
   }
 
+  // ----- Conversational context + narrative walkthrough -----
+  let lastOutlet = null;    // {i,d} most recently focused single outlet
+  let lastList = null;      // { kind:'best'|'worst', cityTitle, picks:[{i,d,s}] }
+  let lastWasList = false;  // was the last answer a ranking (vs a single outlet)?
+
+  const WALK_RX    = /\b(walk\s+me\s+through|walkthrough|tell\s+me\s+about|give\s+me\s+a\s+tour|run\s+me\s+through)\b/;
+  const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
+  const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
+
+  function artFor(div) { return div === 'arena' ? 'an' : 'a'; }
+  function pretty(k) { return (k || '').replace(/_/g, ' '); }
+  // Best available headline metric: pulse if present, else Google rating.
+  function ratingPhrase(d) {
+    const p = pulseOf(d);
+    if (p != null) return `pulse ${fmtPulse(p)}`;
+    if (d.gmaps_rating != null) return `Google rating ${d.gmaps_rating.toFixed(1)} of 5`;
+    return 'not yet rated';
+  }
+  // Rank a list by pulse if any outlet has it, else fall back to Google rating
+  // (90 of 136 outlets, incl. all of Hyderabad, have Google ratings but no pulse).
+  function rankList(list) {
+    const withPulse = list.map(x => ({ i: x.i, d: x.d, s: pulseOf(x.d) })).filter(x => x.s != null);
+    if (withPulse.length) return { metricLabel: 'pulse', fmt: (s) => fmtPulse(s), scored: withPulse };
+    const withG = list.map(x => ({ i: x.i, d: x.d, s: x.d.gmaps_rating })).filter(x => x.s != null);
+    return { metricLabel: 'Google rating', fmt: (s) => s.toFixed(1), scored: withG };
+  }
+  function rankValue(d) {
+    const p = pulseOf(d);
+    if (p != null) return { v: p, label: 'pulse', txt: fmtPulse(p) };
+    if (d.gmaps_rating != null) return { v: d.gmaps_rating, label: 'Google', txt: d.gmaps_rating.toFixed(1) };
+    return null;
+  }
+  function dealerAspectExtremes(d) {
+    const cats = (d.absa_categories || {});
+    const scored = Object.keys(cats).filter(k => k !== 'other' && cats[k].score != null)
+      .map(k => ({ k, score: cats[k].score })).sort((a, b) => b.score - a.score);
+    return scored.length ? { best: scored[0], worst: scored[scored.length - 1] } : { best: null, worst: null };
+  }
+  function narrateDealer(d, lead) {
+    const ex = dealerAspectExtremes(d);
+    let t = `${lead ? lead + ' ' : ''}${d.short_name}, ${artFor(d.division)} ${DIV_LABEL[d.division]} in ${d.city}, ${ratingPhrase(d)}`;
+    if (ex.best) t += `. Strongest on ${pretty(ex.best.k)} at ${ex.best.score} out of 10`;
+    if (ex.worst && ex.best && ex.worst.k !== ex.best.k) t += `, weakest on ${pretty(ex.worst.k)} at ${ex.worst.score}`;
+    return t + '.';
+  }
+  function explainOutlet(d) {
+    const ex = dealerAspectExtremes(d);
+    const parts = [];
+    if (ex.best) parts.push(`strong on ${pretty(ex.best.k)} (${ex.best.score}/10)`);
+    if (ex.worst && ex.best && ex.worst.k !== ex.best.k) parts.push(`weaker on ${pretty(ex.worst.k)} (${ex.worst.score}/10)`);
+    return `${d.short_name} sits at ${ratingPhrase(d)} — ${parts.join(', ') || 'limited feedback captured'}.`;
+  }
+  function explainWhy() {
+    if (lastWasList && lastList && lastList.picks.length) {
+      const dir = lastList.kind === 'worst' ? 'lowest' : 'highest';
+      const because = lastList.kind === 'worst' ? 'complaints outweigh their strengths' : 'their strengths outweigh their weaknesses';
+      const lines = lastList.picks.slice(0, 3).map(p => {
+        const ex = dealerAspectExtremes(p.d);
+        return `${p.d.short_name} (${lastList.metricLabel} ${p.sTxt}${ex.best ? ', best on ' + pretty(ex.best.k) : ''})`;
+      });
+      return `They rank ${dir} in ${lastList.cityTitle} because ${because}: ${lines.join('; ')}.`;
+    }
+    if (lastOutlet) return explainOutlet(lastOutlet.d);
+    return null;
+  }
+  // Split a query on connectors and resolve each candidate to an outlet.
+  function gatherOutlets(q, max) {
+    const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|and|or|better\s+than|better|worse|walk\s+me\s+through|walkthrough|tell\s+me\s+about|then|also|run\s+me\s+through)\b/i)
+      .map(s => s.trim()).filter(s => s.length > 2);
+    const found = [];
+    for (const p of parts) {
+      const m = findOutlet(p) || fuzzyFindOutlet(p);
+      if (m && !found.some(f => f.i === m.i)) { found.push(m); if (found.length >= max) break; }
+    }
+    return found;
+  }
+  // Sequential spoken walkthrough — opens each outlet as its narration begins.
+  function speakWalkthrough(parts) {
+    answerEl.textContent = parts.map(p => p.text).join(' ');
+    if (!('speechSynthesis' in window)) { parts.forEach(p => p.onStart && p.onStart()); return; }
+    try { speechSynthesis.cancel(); } catch (e) {}
+    autoResumeAfterSpeak = false;
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p.text);
+      if (ttsVoice) u.voice = ttsVoice;
+      u.rate = 1.02; u.pitch = 1.05;
+      u.onstart = () => { isSpeaking = true; if (p.onStart) p.onStart(); };
+      if (i === parts.length - 1) u.onend = () => { isSpeaking = false; };
+      speechSynthesis.speak(u);
+    });
+  }
+  function walkthroughDealers(matches) {
+    openDealer(matches[0].i);   // immediate visual for the first stop
+    const leads = ['First,', 'Next,', 'Then,', 'Also,'];
+    const parts = matches.map((m, idx) => ({
+      text: narrateDealer(m.d, leads[Math.min(idx, leads.length - 1)]),
+      onStart: idx === 0 ? null : () => openDealer(m.i)
+    }));
+    const scored = matches.map(m => ({ m, r: rankValue(m.d) })).filter(x => x.r).sort((a, b) => b.r.v - a.r.v);
+    // Only compare head-to-head when both use the same metric (pulse vs pulse, etc.).
+    if (scored.length >= 2 && scored[0].r.label === scored[scored.length - 1].r.label) {
+      const hi = scored[0], lo = scored[scored.length - 1];
+      const lbl = hi.r.label === 'pulse' ? 'pulse' : 'Google rating';
+      parts.push({
+        text: `Overall, ${hi.m.d.short_name} leads on ${lbl} at ${hi.r.txt}, versus ${lo.m.d.short_name} at ${lo.r.txt}.`,
+        onStart: () => zoomToDealers(matches)
+      });
+    }
+    lastOutlet = matches[matches.length - 1]; lastWasList = false;
+    speakWalkthrough(parts);
+  }
+
   // ----- The router -----
   function handleUtterance(text) {
     const q = (text || '').trim();
@@ -3412,19 +3502,31 @@ render();
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
 
-    // Locate: "where is X" / "which city is X" (runs before city aggregation so
-    // "which city is Srikakulam" reports the city, not an outlet named after it).
+    // "Why?" follow-up on the last answer (uses conversational memory).
+    if ((WHY_RX.test(nq)) && nq.split(' ').length <= 5 && (lastWasList ? lastList : lastOutlet)) {
+      const r = explainWhy(); if (r) return showAnswer(r);
+    }
+    // Locate: "where is X" / "which city is X" (before city aggregation).
     if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
-    // Compare two outlets: "X vs Y", "difference between X and Y".
-    if (COMPARE_RX.test(nq)) { const r = handleCompare(q); if (r) return showAnswer(r); }
+    // Comparative / single walkthrough: "walk me through X and Y", "X vs Y",
+    // "is X better or Y", "tell me about X".
+    if (WALK_RX.test(nq) || COMPARE_RX.test(nq)) {
+      const outs = gatherOutlets(q, 4);
+      if (outs.length >= 2) { walkthroughDealers(outs); return; }
+      if (outs.length === 1 && WALK_RX.test(nq)) {
+        openDealer(outs[0].i); lastOutlet = outs[0]; lastWasList = false;
+        return showAnswer(narrateDealer(outs[0].d, ''));
+      }
+    }
 
     // A4.c: aspect (ABSA) intent — fires when an aspect word or complaint
     // word is present AND we can resolve an outlet or city in the query.
     const aspectKey = detectAspect(q);
     const isComplaint = COMPLAINT_RX.test(nq);
     // Enter the aspect/complaint block for an explicit aspect or a HARD complaint
-    // word. Bare "worst"/"weak" fall through to the best/worst ranking below.
-    if (aspectKey || COMPLAINT_HARD_RX.test(nq)) {
+    // word. Bare "worst"/"weak" fall through to the best/worst ranking below, and
+    // a count intent ("how many service centers") wins over aspect.
+    if ((aspectKey || COMPLAINT_HARD_RX.test(nq)) && !AGG_COUNT.test(nq)) {
       // Strip the aspect word from the query before resolving the outlet
       // so it doesn't pollute the score. "how are staff in Gajuwaka" → outlet is Gajuwaka.
       const scrubbed = norm(q).split(' ').filter(t => !ASPECT_MAP[t] && !COMPLAINT_RX.test(t)).join(' ');
@@ -3438,9 +3540,13 @@ render();
           return showAnswer(respondAspectForCity(aspectKey, isComplaint, cityTitle, list));
         }
       }
-      const outletMatch = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      let outletMatch = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      // Conversational fallback: "which staff was mentioned" / "and the service?"
+      // with no named outlet → use the last outlet we were discussing.
+      if (!outletMatch && lastOutlet) outletMatch = lastOutlet;
       if (outletMatch) {
         openDealer(outletMatch.i);
+        lastOutlet = outletMatch; lastWasList = false;
         const line = respondAspectForDealer(aspectKey, isComplaint, outletMatch.d);
         if (line) return showAnswer(line);
       }
@@ -3459,8 +3565,8 @@ render();
           return showAnswer(list.length === 1 ? respondPositiveForDealer(list[0].d) : respondPositiveForCity(list[0].d.city, list));
         }
       }
-      const pm = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
-      if (pm) { openDealer(pm.i); return showAnswer(respondPositiveForDealer(pm.d)); }
+      const pm = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed) || (PRONOUN_RX.test(nq) ? lastOutlet : null);
+      if (pm) { openDealer(pm.i); lastOutlet = pm; lastWasList = false; return showAnswer(respondPositiveForDealer(pm.d)); }
     }
     // State-level count — "how many Arena in Andhra Pradesh".
     const stateCode = stateFromQuery(nq);
@@ -3496,20 +3602,24 @@ render();
         }
         if (AGG_BEST.test(nq) || AGG_WORST.test(nq)) {
           const asc = AGG_WORST.test(nq);
+          const { metricLabel, fmt, scored } = rankList(scoped);
+          if (!scored.length) return showAnswer(`No ratings available in ${cityTitle} for the current selection.`);
+          scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
           const n = parseTopN(nq) || 1;
-          const picks = topScored(scoped, asc, n);
-          if (!picks.length) return showAnswer(`No pulse scores available in ${cityTitle} for the current time range.`);
+          const picks = scored.slice(0, n).map(p => ({ ...p, sTxt: fmt(p.s) }));
+          lastList = { kind: asc ? 'worst' : 'best', cityTitle, metricLabel, picks }; lastWasList = true;
           if (picks.length === 1) {
             openDealer(picks[0].i);
-            return showAnswer(`${asc ? 'Weakest' : 'Top'} outlet in ${cityTitle}: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]}, pulse ${fmtPulse(picks[0].s)}.`);
+            lastOutlet = picks[0]; lastWasList = false;
+            return showAnswer(`${asc ? 'Weakest' : 'Top'} outlet in ${cityTitle}: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]}, ${metricLabel} ${picks[0].sTxt}.`);
           }
           zoomToDealers(picks);
-          const listStr = picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} ${DIV_LABEL[p.d.division]} (${fmtPulse(p.s)})`).join('; ');
-          return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} in ${cityTitle}: ${listStr}.`);
+          const listStr = picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} ${DIV_LABEL[p.d.division]} (${p.sTxt})`).join('; ');
+          return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} in ${cityTitle} by ${metricLabel}: ${listStr}.`);
         }
         if (divFilter) {
           if (!scoped.length) return showAnswer(`No ${DIV_LABEL[divFilter]} outlets in ${cityTitle}.`);
-          if (scoped.length === 1) { openDealer(scoped[0].i); return showAnswer(describeDealer(scoped[0].d)); }
+          if (scoped.length === 1) { openDealer(scoped[0].i); lastOutlet = scoped[0]; lastWasList = false; return showAnswer(describeDealer(scoped[0].d)); }
           zoomToDealers(scoped);
           const names = scoped.map(({ d }) => d.short_name).join(', ');
           return showAnswer(`${scoped.length} ${DIV_LABEL[divFilter]} outlets in ${cityTitle}: ${names}.`);
@@ -3522,6 +3632,7 @@ render();
         }
         // Single outlet in the city → just open it.
         openDealer(all[0].i);
+        lastOutlet = all[0]; lastWasList = false;
         return showAnswer(describeDealer(all[0].d));
       }
     }
@@ -3530,6 +3641,7 @@ render();
     const match = findOutlet(q);
     if (match) {
       openDealer(match.i);
+      lastOutlet = match; lastWasList = false;
       let line = describeDealer(match.d);
       if (match.alternates && match.alternates.length) {
         line += ` Other matches: ${match.alternates.join(', ')}.`;
@@ -3541,6 +3653,7 @@ render();
     const near = nearestOutlets(q, 3);
     if (near.length && near[0].s >= FUZZY_MATCH_MIN) {
       openDealer(near[0].i);
+      lastOutlet = near[0]; lastWasList = false;
       showAnswer(`Did you mean ${near[0].d.short_name}? ${describeDealer(near[0].d)}`);
       return;
     }
