@@ -3146,8 +3146,10 @@ render();
   };
   const COMPLAINT_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|weak|weakness|worst|bad)\b/;
   const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(mvp|drishti|the\s+mvp)|details\s+of\s+mvp|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
-  const GREET_RX = /^(hi|hello|hey|hola|namaste|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
-  const BYE_RX   = /^(bye|goodbye|thanks|thank\s+you|thanks[\s!.?]*bye|bye[\s-]*bye)[\s!.?]*$/i;
+  // Allow a trailing name/filler ("hi Drishti", "hello there") after the greeting.
+  const GREET_RX = /^(hi|hello|hey|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
+  // Allow any combination of farewell words in any order ("bye thank you", "thanks bye").
+  const BYE_RX   = /^((bye|goodbye|thanks|thank\s+you|cheers)[\s,!.?-]*)+(drishti|drishthi)?[\s!.?]*$/i;
 
   function detectAspect(q) {
     // Note: "service" is also a division word — the router checks aspect
