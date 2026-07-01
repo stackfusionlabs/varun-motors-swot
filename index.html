@@ -2694,35 +2694,64 @@ render();
   function toContentTokens(s) {
     return norm(s).split(' ').filter(t => t.length >= 3 && !DRISHTI_STOP_WORDS.has(t));
   }
-  function scoreMatch(queryTokens, candidate) {
-    const c = norm(candidate);
-    if (!c) return 0;
-    let hits = 0;
-    queryTokens.forEach(t => { if (c.includes(t)) hits++; });
-    return hits;
+  // Match score = weighted per-field hit count.
+  // A token that appears in short_name is worth more than in district, so
+  // "Vijayawada" prefers an outlet actually named/located Vijayawada over
+  // one that only shares a district. Full-word matches beat substring hits.
+  const FIELD_WEIGHTS = { short_name: 6, city: 5, district: 2, division: 3, name: 1 };
+  function fieldHits(token, text) {
+    const t = norm(text);
+    if (!t) return 0;
+    // \b works because norm() left only [a-z0-9 ].
+    if (new RegExp(`\\b${token}\\b`).test(t)) return 2;   // exact word
+    if (t.includes(token)) return 1;                       // substring
+    return 0;
+  }
+  function scoreDealer(tokens, d) {
+    let score = 0;
+    for (const t of tokens) {
+      score += FIELD_WEIGHTS.short_name * fieldHits(t, d.short_name);
+      score += FIELD_WEIGHTS.city       * fieldHits(t, d.city);
+      score += FIELD_WEIGHTS.district   * fieldHits(t, d.district || '');
+      score += FIELD_WEIGHTS.division   * fieldHits(t, DIV_LABEL[d.division] || d.division);
+      score += FIELD_WEIGHTS.name       * fieldHits(t, d.name);
+    }
+    return score;
   }
   function findOutlet(query) {
     const tokens = toContentTokens(query);
     if (!tokens.length) return null;
-    // Collect every dealer that matches at the top score — ties are real
-    // (a city like Vijayawada has multiple Varun outlets). We tie-break by
-    // review volume so the "main" outlet wins by default.
     let bestScore = 0;
     const ranked = [];
     (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
-      const candFields = [
-        d.short_name, d.city, d.district || '',
-        DIV_LABEL[d.division] || d.division, d.name,
-      ].join(' ');
-      const s = scoreMatch(tokens, candFields);
+      const s = scoreDealer(tokens, d);
       if (s === 0) return;
       if (s > bestScore) { bestScore = s; ranked.length = 0; }
       if (s === bestScore) ranked.push({ i, d });
     });
     if (!ranked.length) return null;
-    ranked.sort((a, b) => (b.d.reviews_total || 0) - (a.d.reviews_total || 0));
+    // Tie-break: most reviews first, then any Arena before Service/True Value
+    // (Arena is the flagship showroom, most likely intent for a bare place name).
+    const divPriority = { arena: 4, nexa: 3, commercial: 2, service: 1, true_value: 0 };
+    ranked.sort((a, b) => {
+      const rd = (b.d.reviews_total || 0) - (a.d.reviews_total || 0);
+      if (rd) return rd;
+      return (divPriority[b.d.division] || 0) - (divPriority[a.d.division] || 0);
+    });
     const winner = ranked[0];
-    return { ...winner, alternates: ranked.slice(1, 4).map(r => r.d.short_name) };
+    // Build alternates with division suffix so "Ringroad, Ringroad" becomes
+    // "Ringroad Nexa, Ringroad Service".
+    const seen = new Set([`${winner.d.short_name}|${winner.d.division}`]);
+    const alternates = [];
+    for (const r of ranked.slice(1)) {
+      const key = `${r.d.short_name}|${r.d.division}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const div = DIV_LABEL[r.d.division] || r.d.division;
+      alternates.push(`${r.d.short_name} ${div}`);
+      if (alternates.length === 3) break;
+    }
+    return { ...winner, alternates };
   }
   function openDealer(i) {
     const entry = dealerMarkers[i];
