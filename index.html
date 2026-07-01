@@ -3130,11 +3130,131 @@ render();
     return line;
   }
 
+  // ----- A4: aspect (ABSA) and help intents -----
+  // Aspect synonyms → canonical key in dealer.absa_categories.
+  const ASPECT_MAP = {
+    staff: 'staff', employee: 'staff', employees: 'staff', sales: 'staff',
+    salesperson: 'staff', team: 'staff', executive: 'staff', executives: 'staff',
+    service: 'service', servicing: 'service', workshop: 'service', repair: 'service',
+    mechanic: 'service', mechanics: 'service',
+    delivery: 'delivery', delivered: 'delivery', waiting: 'delivery', wait: 'delivery',
+    pricing: 'pricing', price: 'pricing', prices: 'pricing', cost: 'pricing',
+    expensive: 'pricing', cheap: 'pricing',
+    ambiance: 'ambiance', ambience: 'ambiance', atmosphere: 'ambiance',
+    showroom: 'ambiance', environment: 'ambiance',
+    followup: 'followup', 'follow': 'followup', communication: 'followup',
+  };
+  const COMPLAINT_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|weak|weakness|worst|bad)\b/;
+  const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(mvp|drishti|the\s+mvp)|details\s+of\s+mvp|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
+  const GREET_RX = /^(hi|hello|hey|hola|namaste|good\s+(morning|afternoon|evening))[\s!.?]*$/i;
+  const BYE_RX   = /^(bye|goodbye|thanks|thank\s+you|thanks[\s!.?]*bye|bye[\s-]*bye)[\s!.?]*$/i;
+
+  function detectAspect(q) {
+    // Note: "service" is also a division word — the router checks aspect
+    // intent only when NO explicit city/division-only query is present, and
+    // the caller passes through `findOutlet` on the stripped query anyway.
+    for (const t of norm(q).split(' ')) if (ASPECT_MAP[t]) return ASPECT_MAP[t];
+    return null;
+  }
+  function cap(s) { return s ? s[0].toUpperCase() + s.slice(1) : s; }
+
+  function respondAspectForDealer(aspectKey, isComplaint, d) {
+    const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    const cats = d.absa_categories || {};
+    if (aspectKey) {
+      const cat = cats[aspectKey];
+      if (!cat || (!cat.pos && !cat.neg)) {
+        return `No captured feedback about ${aspectKey} at ${d.short_name} ${where}.`;
+      }
+      const scoreTxt = cat.score != null ? ` Score ${cat.score.toFixed(1)} out of 10.` : '';
+      const framed = isComplaint
+        ? `${cat.neg} negative vs ${cat.pos} positive mentions`
+        : `${cat.pos} positive vs ${cat.neg} negative mentions`;
+      // Try to surface a matching mention as an example.
+      const wantSent = isComplaint ? 'negative' : 'positive';
+      const mentions = (d.absa_top_mentions || [])
+        .filter(m => m.sentiment === wantSent)
+        .slice(0, 2)
+        .map(m => `"${m.text}"`);
+      const example = mentions.length ? ` Sample: ${mentions.join(', ')}.` : '';
+      return `${cap(aspectKey)} at ${d.short_name} ${where}: ${framed}.${scoreTxt}${example}`;
+    }
+    // No specific aspect — but a complaint query fell through.
+    if (isComplaint) {
+      const negs = (d.absa_top_mentions || []).filter(m => m.sentiment === 'negative').slice(0, 3);
+      if (!negs.length) {
+        return `No captured complaints at ${d.short_name} ${where}. ${d.absa_mentions_pos || 0} positive vs ${d.absa_mentions_neg || 0} negative mentions overall.`;
+      }
+      return `Top complaints at ${d.short_name} ${where}: ${negs.map(m => `"${m.text}" mentioned ${m.count}×`).join(', ')}.`;
+    }
+    return null;
+  }
+  function respondAspectForCity(aspectKey, isComplaint, cityTitle, list) {
+    // Aggregate the aspect across all outlets in the city.
+    let pos = 0, neg = 0, weighted = 0, weight = 0, bestOutlet = null, worstOutlet = null;
+    for (const { d } of list) {
+      const cat = (d.absa_categories || {})[aspectKey];
+      if (!cat) continue;
+      pos += cat.pos || 0;
+      neg += cat.neg || 0;
+      if (cat.score != null) {
+        weighted += cat.score * ((cat.pos || 0) + (cat.neg || 0));
+        weight += (cat.pos || 0) + (cat.neg || 0);
+        if (!bestOutlet || cat.score > bestOutlet.s) bestOutlet = { d, s: cat.score };
+        if (!worstOutlet || cat.score < worstOutlet.s) worstOutlet = { d, s: cat.score };
+      }
+    }
+    if (!pos && !neg) return `No ${aspectKey} feedback captured across ${cityTitle}.`;
+    const avg = weight ? (weighted / weight).toFixed(1) : '?';
+    let line = `${cap(aspectKey)} across ${cityTitle}: ${pos} positive vs ${neg} negative mentions, weighted score ${avg}/10.`;
+    if (bestOutlet && worstOutlet && bestOutlet.d !== worstOutlet.d) {
+      line += ` Best: ${bestOutlet.d.short_name} (${bestOutlet.s.toFixed(1)}). Weakest: ${worstOutlet.d.short_name} (${worstOutlet.s.toFixed(1)}).`;
+    }
+    return line;
+  }
+
+  function helpText() {
+    return "I'm Drishti — Varun Motors' offline voice assistant. I can find outlets, cities, and aspect feedback. Try: 'Gajuwaka', 'best in Vizag', 'how many Arena in Vijayawada', 'how are staff in Ringroad', or 'top complaints in Marripalem'.";
+  }
+
   // ----- The router -----
   function handleUtterance(text) {
     const q = (text || '').trim();
     if (!q) return;
     const nq = norm(q);
+
+    // A4.a: greetings + goodbyes (short-circuit).
+    if (GREET_RX.test(q)) return showAnswer("Hello! I'm Drishti. Ask about an outlet, city, or say 'help' to see what I can do.");
+    if (BYE_RX.test(q))   { showAnswer("Goodbye.", { resumeAfter: false }); return closeOverlay(); }
+    // A4.b: help / meta.
+    if (HELP_RX.test(nq)) return showAnswer(helpText());
+
+    // A4.c: aspect (ABSA) intent — fires when an aspect word or complaint
+    // word is present AND we can resolve an outlet or city in the query.
+    const aspectKey = detectAspect(q);
+    const isComplaint = COMPLAINT_RX.test(nq);
+    if (aspectKey || isComplaint) {
+      // Strip the aspect word from the query before resolving the outlet
+      // so it doesn't pollute the score. "how are staff in Gajuwaka" → outlet is Gajuwaka.
+      const scrubbed = norm(q).split(' ').filter(t => !ASPECT_MAP[t] && !COMPLAINT_RX.test(t)).join(' ');
+      const cityKey = findCityInQuery(scrubbed);
+      if (cityKey) {
+        const list = dealersInCity(cityKey);
+        if (list.length) {
+          const cityTitle = list[0].d.city;
+          zoomToDealers(list);
+          return showAnswer(respondAspectForCity(aspectKey, isComplaint, cityTitle, list));
+        }
+      }
+      const outletMatch = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      if (outletMatch) {
+        openDealer(outletMatch.i);
+        const line = respondAspectForDealer(aspectKey, isComplaint, outletMatch.d);
+        if (line) return showAnswer(line);
+      }
+      // Aspect word but no outlet/city to bind to.
+      if (aspectKey) return showAnswer(`Which outlet or city? Try "how is ${aspectKey} at Gajuwaka" or "${aspectKey} in Hyderabad".`);
+    }
 
     // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
     // "Visakhapatnam" gives an overview instead of picking one weird outlet
