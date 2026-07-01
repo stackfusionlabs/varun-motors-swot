@@ -2520,14 +2520,6 @@ render();
     </select>
     <span id="drishti-engine-status" class="d-engine-status"></span>
   </div>
-  <div class="d-voice-row">
-    <label for="drishti-brain-select">Brain</label>
-    <select id="drishti-brain-select" title="How Drishti understands and answers">
-      <option value="rules">Rules (instant, exact)</option>
-      <option value="llm">Drishti AI (offline LLM)</option>
-    </select>
-    <span id="drishti-brain-status" class="d-engine-status"></span>
-  </div>
   <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
   <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
   <div class="d-answer" id="drishti-answer"></div>
@@ -2825,75 +2817,6 @@ render();
     return { transcribe, recordUntilSilence, stop, isReady };
   })();
 
-  // ---- Tier-3 offline LLM (WebLLM / Llama-3.2-1B, WebGPU) ----
-  // Grounded RAG: we resolve the outlet/city deterministically, hand the model
-  // ONLY those facts, and ask it to phrase an answer. The model never sees the
-  // full dataset and is told to use only the given facts — so it phrases
-  // naturally without inventing numbers.
-  const llm = (function () {
-    let engine = null;
-    let loading = null;
-    const MODEL_ID = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
-    const LIB_NAME = 'Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm';
-
-    async function loadRuntime() {
-      const attempts = ['./js/vendor/web-llm.js', 'https://esm.run/@mlc-ai/web-llm@0.2.79'];
-      let mod = null, err = null;
-      for (const u of attempts) { try { mod = await import(u); break; } catch (e) { err = e; } }
-      if (!mod) throw new Error('web-llm unavailable: ' + (err && err.message));
-      return mod;
-    }
-
-    // App config pointing model + lib at local files (served by http.server).
-    function localAppConfig() {
-      return {
-        model_list: [{
-          model: './models/mlc-ai/' + MODEL_ID + '/',
-          model_id: MODEL_ID,
-          model_lib: './js/vendor/' + LIB_NAME,
-          overrides: { context_window_size: 4096 }
-        }]
-      };
-    }
-
-    async function ensureEngine(setStatus) {
-      if (engine) return engine;
-      if (loading) return loading;
-      loading = (async () => {
-        const webllm = await loadRuntime();
-        setStatus('Loading Drishti AI — first time only, ~1 min…', 'warn');
-        const onProg = (r) => setStatus((r && r.text) ? r.text : 'loading…', 'warn');
-        let eng;
-        try {
-          // Prefer fully-local (offline) model + lib.
-          eng = await webllm.CreateMLCEngine(MODEL_ID, { appConfig: localAppConfig(), initProgressCallback: onProg });
-        } catch (e) {
-          // Local files missing/blocked → fall back to WebLLM's built-in config
-          // (fetches from CDN once, then browser-cached; airplane mode after).
-          console.warn('[llm] local config failed, using default:', e);
-          setStatus('Local model not found — fetching once from CDN…', 'warn');
-          eng = await webllm.CreateMLCEngine(MODEL_ID, { initProgressCallback: onProg });
-        }
-        engine = eng;
-        setStatus('Drishti AI ready', 'ok');
-        return engine;
-      })();
-      return loading;
-    }
-
-    async function generate(system, user, setStatus) {
-      const eng = await ensureEngine(setStatus);
-      const res = await eng.chat.completions.create({
-        messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        temperature: 0.2,
-        max_tokens: 180
-      });
-      return (res.choices[0].message.content || '').trim();
-    }
-
-    return { generate, isReady: () => !!engine, warmup: (setStatus) => ensureEngine(setStatus) };
-  })();
-
   async function startListeningWhisper() {
     openOverlay();
     answerEl.textContent = '';
@@ -2948,29 +2871,6 @@ render();
       sttEngine = e.target.value;
       localStorage.setItem('drishti.stt', sttEngine);
       if (engineStatusEl) engineStatusEl.textContent = '';
-    });
-  }
-
-  // ----- Brain picker (Rules vs offline LLM) -----
-  let brainMode = localStorage.getItem('drishti.brain') || 'rules';
-  const brainSelectEl = document.getElementById('drishti-brain-select');
-  const brainStatusEl = document.getElementById('drishti-brain-status');
-  if (brainSelectEl) {
-    brainSelectEl.value = brainMode;
-    brainSelectEl.addEventListener('change', e => {
-      brainMode = e.target.value;
-      localStorage.setItem('drishti.brain', brainMode);
-      if (brainMode === 'llm') {
-        // Pre-warm so the first question isn't cold (big win for a live demo).
-        const setStatus = (m, c) => {
-          if (!brainStatusEl) return;
-          brainStatusEl.textContent = m || '';
-          brainStatusEl.className = 'd-engine-status' + (c ? ' ' + c : '');
-        };
-        llm.warmup(setStatus).catch(err => setStatus((err && err.message) || 'load failed', 'warn'));
-      } else if (brainStatusEl) {
-        brainStatusEl.textContent = '';
-      }
     });
   }
 
@@ -3191,7 +3091,8 @@ render();
   // Colloquial names → canonical city name in DASHBOARD_DATA.
   const CITY_ALIASES = {
     'vizag': 'visakhapatnam', 'vskp': 'visakhapatnam', 'waltair': 'visakhapatnam',
-    'viza': 'visakhapatnam', 'visakha': 'visakhapatnam',
+    'viza': 'visakhapatnam', 'visakha': 'visakhapatnam', 'visek': 'visakhapatnam',
+    'vizhak': 'visakhapatnam', 'vizak': 'visakhapatnam', 'vizac': 'visakhapatnam',
     'hyd': 'hyderabad', 'hyderabaad': 'hyderabad',
     'vij': 'vijayawada', 'bezawada': 'vijayawada',
     'skl': 'srikakulam',
@@ -3218,7 +3119,18 @@ render();
       const aliased = CITY_ALIASES[t];
       if (aliased && CITY_SET.has(aliased)) return aliased;
     }
-    return null;
+    // Fuzzy fallback for typos / mishears ("hydrabad"→hyderabad, "vijaywada"→vijayawada).
+    return fuzzyCityFromQuery(q);
+  }
+  // High-threshold (0.88) Jaro-Winkler city match; only on tokens ≥5 chars so it
+  // won't hijack short outlet queries. Exact + alias are tried first by the caller.
+  function fuzzyCityFromQuery(q) {
+    const toks = norm(q).split(' ').filter(t => t.length >= 5);
+    let best = { s: 0, city: null };
+    for (const t of toks) {
+      for (const c of CITY_SET) { const s = jaroWinkler(t, c); if (s > best.s) best = { s, city: c }; }
+    }
+    return best.s >= 0.88 ? best.city : null;
   }
   function dealersInCity(cityNorm) {
     const list = [];
@@ -3285,6 +3197,10 @@ render();
     followup: 'followup', 'follow': 'followup', communication: 'followup',
   };
   const COMPLAINT_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|weak|weakness|worst|bad)\b/;
+  // "Hard" complaint words unambiguously mean feedback (not a best/worst ranking).
+  // Bare "worst"/"weak" are excluded here so "three worst places" ranks outlets
+  // instead of dumping complaints.
+  const COMPLAINT_HARD_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|grievance|bad\s+things?)\b/;
   const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(mvp|drishti|the\s+mvp)|details\s+of\s+mvp|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
   // Allow a trailing name/filler ("hi Drishti", "hello there") after the greeting.
   const GREET_RX = /^(hi|hello|hey|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
@@ -3379,118 +3295,106 @@ render();
   }
 
   function helpText() {
-    return "I'm Drishti — Varun Motors' offline voice assistant. I can find outlets, cities, and aspect feedback. Try: 'Gajuwaka', 'best in Vizag', 'how many Arena in Vijayawada', 'how are staff in Ringroad', or 'top complaints in Marripalem'.";
+    return "I'm Drishti — Varun Motors' offline voice assistant. Ask me to find an outlet or city, rank the best or worst (\"three best in Vizag\"), count outlets (\"how many Arena in Andhra Pradesh\"), compare two (\"Gajuwaka vs MVP Colony\"), locate one (\"which city is Srikakulam\"), or dig into feedback (\"strengths of Gajuwaka\", \"top complaints in Marripalem\", \"how is staff in Ringroad\").";
   }
 
-  // ----- Tier-3 grounded RAG: resolve entities → compact facts → LLM phrasing -----
-  const ASPECT_ORDER = ['staff', 'service', 'delivery', 'pricing', 'ambiance', 'followup'];
-  function fmtDealerFacts(d) {
-    const pulse = pulseOf(d);
+  // ----- Extended intents: compare, locate, top-N, strengths, state, memory -----
+  const NUM_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, couple: 2, few: 3, several: 4 };
+  function parseTopN(nq) {
+    const m = nq.match(/\b(\d{1,2}|one|two|three|four|five|six|seven|couple|few|several)\b/);
+    if (!m) return null;
+    const n = /^\d+$/.test(m[1]) ? parseInt(m[1], 10) : NUM_WORDS[m[1]];
+    return (n >= 1 && n <= 25) ? n : null;
+  }
+  const COMPARE_RX  = /\b(compare|comparison|versus|vs|difference\s+between|better\s+between|which\s+is\s+better)\b/;
+  const LOCATE_RX   = /\b(where\s+is|where'?s|which\s+city|what\s+city|in\s+which\s+city|located|location\s+of)\b/;
+  const POSITIVE_RX = /\b(strength|strengths|good\s+things?|good\s+about|best\s+about|positives?|\bpros\b|highlights?|what'?s\s+good)\b/;
+  const STATE_MAP   = { 'andhra pradesh': 'AP', 'andhra': 'AP', 'ap': 'AP', 'telangana': 'TG', 'telengana': 'TG', 'tg': 'TG', 'ts': 'TG' };
+  const STATE_LABEL = { AP: 'Andhra Pradesh', TG: 'Telangana' };
+  function stateFromQuery(nq) {
+    for (const k in STATE_MAP) { if (new RegExp(`\\b${k.replace(' ', '\\s+')}\\b`).test(nq)) return STATE_MAP[k]; }
+    return null;
+  }
+
+  // Conversational memory: last resolved city, so "and the worst?" carries context.
+  let lastCity = null;
+
+  function topScored(list, asc, n) {
+    const scored = list.map(x => ({ i: x.i, d: x.d, s: pulseOf(x.d) })).filter(x => x.s != null);
+    scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
+    return scored.slice(0, n);
+  }
+
+  function respondPositiveForDealer(d) {
     const cats = d.absa_categories || {};
-    const aspectStr = ASPECT_ORDER.filter(k => cats[k]).map(k => {
-      const c = cats[k];
-      return `${k} ${c.score}/10 (${c.pos || 0} positive, ${c.neg || 0} negative)`;
-    }).join('; ');
+    const top = Object.entries(cats).filter(([k]) => k !== 'other')
+      .map(([k, c]) => ({ k, score: c.score, pos: c.pos || 0 }))
+      .filter(x => x.pos > 0).sort((a, b) => (b.score - a.score) || (b.pos - a.pos)).slice(0, 3);
+    const aspectStr = top.map(x => `${x.k} (${x.score}/10)`).join(', ');
     const pos = (d.absa_top_mentions || []).filter(m => m.sentiment === 'positive').slice(0, 3).map(m => `"${m.text}"`).join(', ');
-    const neg = (d.absa_top_mentions || []).filter(m => m.sentiment === 'negative').slice(0, 3).map(m => `"${m.text}"`).join(', ');
-    const div = DIV_LABEL[d.division] || d.division;
-    return [
-      `${d.short_name} — ${div} in ${d.city}${d.district ? ', ' + d.district + ' district' : ''}.`,
-      pulse != null ? `Pulse score ${fmtPulse(pulse)} on a -5 to +5 scale.` : 'No pulse score in the current range.',
-      d.gmaps_rating != null ? `Google rating ${d.gmaps_rating.toFixed(1)} of 5 from ${d.gmaps_total_reviews || '?'} reviews.` : '',
-      aspectStr ? `Aspect scores (out of 10): ${aspectStr}.` : '',
-      pos ? `Most praised: ${pos}.` : '',
-      neg ? `Complaints: ${neg}.` : 'No notable complaints captured.'
-    ].filter(Boolean).join(' ');
+    const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    if (!aspectStr && !pos) return `No standout positive feedback captured yet for ${d.short_name}, ${where}.`;
+    let line = `Strengths of ${d.short_name}, ${where}:`;
+    if (aspectStr) line += ` strongest on ${aspectStr}.`;
+    if (pos) line += ` Customers praise ${pos}.`;
+    return line;
   }
-  function fmtCityFacts(cityTitle, list) {
-    const scored = list.map(x => ({ d: x.d, s: pulseOf(x.d) })).filter(x => x.s != null).sort((a, b) => b.s - a.s);
-    const top = scored.slice(0, 3).map(x => `${x.d.short_name} (${DIV_LABEL[x.d.division]}, ${fmtPulse(x.s)})`).join(', ');
-    const bottom = scored.slice(-3).reverse().map(x => `${x.d.short_name} (${DIV_LABEL[x.d.division]}, ${fmtPulse(x.s)})`).join(', ');
-    return `${cityTitle} has ${list.length} Varun Motors outlets (${divBreakdown(list)}). Highest pulse: ${top || 'n/a'}. Lowest pulse: ${bottom || 'n/a'}.`;
+  function respondPositiveForCity(cityTitle, list) {
+    const best = topScored(list, false, 1)[0];
+    const agg = {};
+    for (const { d } of list) for (const [k, c] of Object.entries(d.absa_categories || {})) {
+      if (k === 'other') continue;
+      agg[k] = agg[k] || { w: 0, n: 0 };
+      const n = (c.pos || 0) + (c.neg || 0);
+      agg[k].w += (c.score || 0) * n; agg[k].n += n;
+    }
+    const bestAspect = Object.entries(agg).filter(([, v]) => v.n).map(([k, v]) => ({ k, s: v.w / v.n })).sort((a, b) => b.s - a.s)[0];
+    let line = `${cityTitle}'s strengths:`;
+    if (best) line += ` top performer ${best.d.short_name} ${DIV_LABEL[best.d.division]} at pulse ${fmtPulse(best.s)}`;
+    if (bestAspect) line += `${best ? ',' : ''} strongest area is ${bestAspect.k} (${bestAspect.s.toFixed(1)}/10)`;
+    return line + '.';
   }
-  function globalOverviewFacts() {
-    const byCity = {};
-    (DASHBOARD_DATA.dealers || []).forEach(d => { byCity[d.city] = (byCity[d.city] || 0) + 1; });
-    const top = Object.entries(byCity).sort((a, b) => b[1] - a[1]).slice(0, 6)
-      .map(([c, n]) => `${c} (${n})`).join(', ');
-    return `Varun Motors runs ${(DASHBOARD_DATA.dealers || []).length} outlets across Andhra Pradesh and Telangana. Largest presence: ${top}.`;
-  }
-  // Resolve the query to the relevant record(s) and build a compact fact block.
-  function buildLLMContext(query) {
-    // Comparison: "X vs Y", "between X and Y", "X or Y".
-    const parts = query.split(/\b(?:versus|vs|compared to|compare|between|and|or)\b/i)
+
+  function handleCompare(q) {
+    const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|and|or|better\s+than)\b/i)
       .map(s => s.trim()).filter(s => s.length > 2);
-    if (parts.length >= 2) {
-      const found = [];
-      for (const p of parts) {
-        const m = findOutlet(p) || fuzzyFindOutlet(p);
-        if (m && !found.some(f => f.i === m.i)) found.push(m);
-      }
-      if (found.length >= 2) {
-        return { scope: 'compare', matches: found, facts: found.map(f => fmtDealerFacts(f.d)).join('\n') };
-      }
+    const found = [];
+    for (const p of parts) {
+      const m = findOutlet(p) || fuzzyFindOutlet(p);
+      if (m && !found.some(f => f.i === m.i)) found.push(m);
+      if (found.length === 2) break;
     }
-    // City.
-    const cityKey = findCityInQuery(query);
-    if (cityKey) {
-      const list = dealersInCity(cityKey);
-      if (list.length === 1) {
-        return { scope: 'outlet', match: list[0], facts: fmtDealerFacts(list[0].d) };
-      }
-      if (list.length) {
-        const cityTitle = list[0].d.city;
-        let facts = fmtCityFacts(cityTitle, list);
-        const aspectKey = detectAspect(query);
-        if (aspectKey) {
-          const ranked = list.map(x => ({ d: x.d, c: (x.d.absa_categories || {})[aspectKey] }))
-            .filter(x => x.c).sort((a, b) => b.c.score - a.c.score);
-          if (ranked.length) {
-            facts += `\n${aspectKey} score by outlet: ` +
-              ranked.slice(0, 6).map(x => `${x.d.short_name} ${x.c.score}/10`).join(', ') +
-              (ranked.length > 6 ? ', and more' : '') + '.';
-          }
-        }
-        return { scope: 'city', list, cityTitle, facts };
-      }
+    if (found.length < 2) return null;
+    const [a, b] = found;
+    zoomToDealers(found);
+    const sa = pulseOf(a.d), sb = pulseOf(b.d);
+    if (sa == null || sb == null) {
+      return `${a.d.short_name} is a ${DIV_LABEL[a.d.division]} in ${a.d.city}; ${b.d.short_name} is a ${DIV_LABEL[b.d.division]} in ${b.d.city}. Not enough review data to compare pulse.`;
     }
-    // Single outlet.
-    const m = findOutlet(query) || fuzzyFindOutlet(query);
-    if (m) return { scope: 'outlet', match: m, facts: fmtDealerFacts(m.d) };
-    // Nothing resolved → global overview so the model can still be useful.
-    return { scope: 'none', facts: globalOverviewFacts() };
+    const win = sa >= sb ? a : b, ws = Math.max(sa, sb), ls = Math.min(sa, sb);
+    return `${a.d.short_name} pulse ${fmtPulse(sa)} versus ${b.d.short_name} pulse ${fmtPulse(sb)}. ${win.d.short_name} is stronger by ${(ws - ls).toFixed(1)} points.`;
   }
 
-  const DRISHTI_SYSTEM_PROMPT =
-    "You are Drishti, the voice analyst for Varun Motors, a Maruti Suzuki dealership group in Andhra Pradesh and Telangana, India. " +
-    "Answer the user's question using ONLY the facts provided to you. Be concise and conversational — 1 to 2 short sentences suitable for reading aloud. " +
-    "Pulse scores range from -5 (worst) to +5 (best); aspect scores are out of 10. " +
-    "Never invent outlet names, numbers, or facts that are not in the provided facts. If the facts don't answer the question, say you don't have that data.";
-
-  async function answerWithLLM(query) {
-    const setStatus = (m, c) => {
-      if (!brainStatusEl) return;
-      brainStatusEl.textContent = m || '';
-      brainStatusEl.className = 'd-engine-status' + (c ? ' ' + c : '');
-    };
-    const ctx = buildLLMContext(query);
-    // Move the map to match the resolved scope (so the visual tracks the answer).
-    if (ctx.scope === 'outlet' && ctx.match) openDealer(ctx.match.i);
-    else if (ctx.scope === 'city') zoomToDealers(ctx.list);
-    else if (ctx.scope === 'compare') zoomToDealers(ctx.matches);
-    const user = `Facts:\n${ctx.facts}\n\nQuestion: ${query}\n\nAnswer in 1-2 short spoken sentences using only the facts above.`;
-    try {
-      answerEl.textContent = llm.isReady() ? 'Thinking…' : 'Waking up Drishti AI…';
-      const out = await llm.generate(DRISHTI_SYSTEM_PROMPT, user, setStatus);
-      setStatus('Drishti AI ready', 'ok');
-      showAnswer(out || "I don't have that data.");
-    } catch (e) {
-      console.error('[llm]', e);
-      setStatus((e && e.message) ? e.message : 'AI error', 'warn');
-      // Graceful degrade: fall back to the deterministic rules engine.
-      showAnswer(`AI unavailable (${e && e.message ? e.message : 'error'}). Using rules instead.`);
-      setTimeout(() => handleUtteranceRules(query, norm(query)), 50);
+  function handleLocate(q) {
+    const scrubbed = norm(q).replace(/\b(where|wheres|is|are|which|what|city|cities|located|location|of|in|the|present|find|tell|me|does|do|situated)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    // City first, so "which city is Srikakulam" answers the city (not Nexa Srikakulam).
+    let cityKey = CITY_SET.has(scrubbed) ? scrubbed : (CITY_ALIASES[scrubbed] || null);
+    if (!cityKey) cityKey = findCityInQuery(scrubbed);
+    if (cityKey && CITY_SET.has(cityKey)) {
+      const list = dealersInCity(cityKey);
+      if (list.length) {
+        lastCity = cityKey; zoomToDealers(list);
+        const st = STATE_LABEL[list[0].d.state] || list[0].d.state || '';
+        return `${list[0].d.city} is a city${st ? ' in ' + st : ''} with ${list.length} Varun Motors outlets (${divBreakdown(list)}).`;
+      }
     }
+    const m = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+    if (m) {
+      openDealer(m.i);
+      const st = STATE_LABEL[m.d.state] || m.d.state || '';
+      return `${m.d.short_name} is a ${DIV_LABEL[m.d.division]} in ${m.d.city}${m.d.district ? ', ' + m.d.district + ' district' : ''}${st ? ', ' + st : ''}.`;
+    }
+    return null;
   }
 
   // ----- The router -----
@@ -3498,25 +3402,29 @@ render();
     const q = (text || '').trim();
     if (!q) return;
     const nq = norm(q);
-
-    // Universal short-circuits (both brains): goodbye closes the overlay.
     if (BYE_RX.test(q)) { showAnswer("Goodbye.", { resumeAfter: false }); return closeOverlay(); }
-    // LLM brain handles everything else conversationally.
-    if (brainMode === 'llm') return answerWithLLM(q);
     return handleUtteranceRules(q, nq);
   }
 
   function handleUtteranceRules(q, nq) {
-    // A4.a: greeting (bye is handled by the caller for both brains).
+    // A4.a: greeting (bye is handled by the caller).
     if (GREET_RX.test(q)) return showAnswer("Hello! I'm Drishti. Ask about an outlet, city, or say 'help' to see what I can do.");
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
+
+    // Locate: "where is X" / "which city is X" (runs before city aggregation so
+    // "which city is Srikakulam" reports the city, not an outlet named after it).
+    if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
+    // Compare two outlets: "X vs Y", "difference between X and Y".
+    if (COMPARE_RX.test(nq)) { const r = handleCompare(q); if (r) return showAnswer(r); }
 
     // A4.c: aspect (ABSA) intent — fires when an aspect word or complaint
     // word is present AND we can resolve an outlet or city in the query.
     const aspectKey = detectAspect(q);
     const isComplaint = COMPLAINT_RX.test(nq);
-    if (aspectKey || isComplaint) {
+    // Enter the aspect/complaint block for an explicit aspect or a HARD complaint
+    // word. Bare "worst"/"weak" fall through to the best/worst ranking below.
+    if (aspectKey || COMPLAINT_HARD_RX.test(nq)) {
       // Strip the aspect word from the query before resolving the outlet
       // so it doesn't pollute the score. "how are staff in Gajuwaka" → outlet is Gajuwaka.
       const scrubbed = norm(q).split(' ').filter(t => !ASPECT_MAP[t] && !COMPLAINT_RX.test(t)).join(' ');
@@ -3525,6 +3433,7 @@ render();
         const list = dealersInCity(cityKey);
         if (list.length) {
           const cityTitle = list[0].d.city;
+          lastCity = cityKey;
           zoomToDealers(list);
           return showAnswer(respondAspectForCity(aspectKey, isComplaint, cityTitle, list));
         }
@@ -3539,13 +3448,43 @@ render();
       if (aspectKey) return showAnswer(`Which outlet or city? Try "how is ${aspectKey} at Gajuwaka" or "${aspectKey} in Hyderabad".`);
     }
 
+    // Strengths / positives — "what are strengths of X", "good things about X".
+    if (POSITIVE_RX.test(nq) && !isComplaint) {
+      const scrubbed = norm(q).replace(/\b(strength|strengths|good|things|thing|about|best|positive|positives|pros|highlight|highlights|whats|what|are|the|of)\b/g, ' ').replace(/\s+/g, ' ').trim();
+      const ck = findCityInQuery(scrubbed);
+      if (ck) {
+        const list = dealersInCity(ck);
+        if (list.length) {
+          lastCity = ck; zoomToDealers(list);
+          return showAnswer(list.length === 1 ? respondPositiveForDealer(list[0].d) : respondPositiveForCity(list[0].d.city, list));
+        }
+      }
+      const pm = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      if (pm) { openDealer(pm.i); return showAnswer(respondPositiveForDealer(pm.d)); }
+    }
+    // State-level count — "how many Arena in Andhra Pradesh".
+    const stateCode = stateFromQuery(nq);
+    if (AGG_COUNT.test(nq) && stateCode && !findCityInQuery(q)) {
+      const divFilter = divisionFilterFromQuery(q);
+      let list = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d })).filter(x => x.d.state === stateCode);
+      if (divFilter) list = list.filter(x => x.d.division === divFilter);
+      zoomToDealers(list);
+      const label = divFilter ? `${DIV_LABEL[divFilter]} outlets` : 'outlets';
+      return showAnswer(`Varun Motors has ${list.length} ${label} in ${STATE_LABEL[stateCode]}${divFilter ? '' : ': ' + divBreakdown(list)}.`);
+    }
+
     // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
     // "Visakhapatnam" gives an overview instead of picking one weird outlet
     // whose short_name happens to contain the city.
-    const cityKey = findCityInQuery(q);
+    let cityKey = findCityInQuery(q);
+    // Conversational follow-up: "and the worst?" with no city → reuse last city.
+    if (!cityKey && lastCity && (AGG_BEST.test(nq) || AGG_WORST.test(nq) || AGG_COUNT.test(nq)) && !findOutlet(q)) {
+      cityKey = lastCity;
+    }
     if (cityKey) {
       const all = dealersInCity(cityKey);
       if (all.length) {
+        lastCity = cityKey;
         const cityTitle = all[0].d.city;
         const divFilter = divisionFilterFromQuery(q);
         const scoped = divFilter ? all.filter(({ d }) => d.division === divFilter) : all;
@@ -3556,14 +3495,17 @@ render();
           return showAnswer(`Varun Motors has ${scoped.length} ${label} in ${cityTitle}${divFilter ? '' : ': ' + divBreakdown(scoped)}.`);
         }
         if (AGG_BEST.test(nq) || AGG_WORST.test(nq)) {
-          const scored = scoped.map(x => ({ ...x, s: pulseOf(x.d) })).filter(x => x.s != null);
-          if (!scored.length) return showAnswer(`No pulse scores available in ${cityTitle} for the current time range.`);
           const asc = AGG_WORST.test(nq);
-          scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
-          const pick = scored[0];
-          openDealer(pick.i);
-          const verb = asc ? 'Weakest' : 'Top';
-          return showAnswer(`${verb} outlet in ${cityTitle}: ${pick.d.short_name} ${DIV_LABEL[pick.d.division]}, pulse ${fmtPulse(pick.s)}.`);
+          const n = parseTopN(nq) || 1;
+          const picks = topScored(scoped, asc, n);
+          if (!picks.length) return showAnswer(`No pulse scores available in ${cityTitle} for the current time range.`);
+          if (picks.length === 1) {
+            openDealer(picks[0].i);
+            return showAnswer(`${asc ? 'Weakest' : 'Top'} outlet in ${cityTitle}: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]}, pulse ${fmtPulse(picks[0].s)}.`);
+          }
+          zoomToDealers(picks);
+          const listStr = picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} ${DIV_LABEL[p.d.division]} (${fmtPulse(p.s)})`).join('; ');
+          return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} in ${cityTitle}: ${listStr}.`);
         }
         if (divFilter) {
           if (!scoped.length) return showAnswer(`No ${DIV_LABEL[divFilter]} outlets in ${cityTitle}.`);

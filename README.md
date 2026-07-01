@@ -49,18 +49,19 @@ commit it, and push — Vercel redeploys on push to `main`.
 
 ## Drishti architecture
 
-Two selectable "brains" in the overlay:
+Drishti is a **fully offline, deterministic** voice analyst — no LLM, zero
+hallucination, instant answers. Everything runs in the browser:
 
-| Brain | How it answers | Best for |
-|---|---|---|
-| **Rules** | Deterministic intent match + fuzzy (Jaro-Winkler) name resolution | Exact, instant lookups — outlet/city/aspect/counts |
-| **Drishti AI** | Grounded RAG: resolves the outlet/city, hands **only** those facts to an offline Llama-3.2-1B (WebGPU), which phrases the answer | Natural, free-form questions ("what's better between X and Y") |
+- **STT:** WebSpeech (online, instant) or `Xenova/whisper-base.en` quantized (~90 MB, offline)
+- **Understanding:** a rule + fuzzy-match engine (Jaro-Winkler name resolution) that
+  parses intents — outlet/city lookup, best/worst/top-N ranking, counts (city &
+  state), compare two outlets, "which city is X", aspect feedback (staff/service/
+  delivery/pricing/ambiance/followup), complaints, strengths — with conversational
+  memory ("best in Vizag" → "and the worst?")
+- **TTS:** the browser's `SpeechSynthesis` (OS voices, zero download)
 
-The LLM is **grounded** — it never sees the full dataset and is instructed to
-use only the facts it's given, so it phrases naturally without inventing numbers.
+Every number comes straight from `dashboard_data.js`, so answers are exact.
 
-Speech-to-text: `Xenova/whisper-base.en` quantized (~90 MB) or WebSpeech.
-Text-to-speech: the browser's `SpeechSynthesis` (OS voices, zero download).
-
-First LLM load fetches ~880 MB of model shards once (from `models/` locally, or
-CDN + browser cache). After that, **airplane mode works**.
+An offline LLM (Llama-3.2-1B via WebLLM) was prototyped but dropped: a 1B model
+hallucinated numbers and was too slow (~5–9 s/answer) for a live pitch. The
+deterministic engine answers in 0 ms.
