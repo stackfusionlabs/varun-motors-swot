@@ -2512,7 +2512,7 @@ render();
   <div class="d-bars"><span></span><span></span><span></span><span></span><span></span></div>
   <div class="d-transcript" id="drishti-transcript">Tap the mic and say something like <i>"show me Gajuwaka"</i>.</div>
   <div class="d-answer" id="drishti-answer"></div>
-  <div class="d-hints"><b>Try:</b> "show me Marripalem" · "open Madhapur Nexa" · "find Gajuwaka Arena"</div>
+  <div class="d-hints"><b>Try:</b> "Gajuwaka" · "Vizag" · "best in Hyderabad" · "how many in Vijayawada" · "Visakhapatnam Nexa"</div>
 </div>
 <script id="drishti-bot">
 // =============================================================================
@@ -2785,10 +2785,14 @@ render();
     else if (overRight  > 0) dx = overRight;
     if (dx || dy) map.panBy([dx, dy], { animate: true, duration: 0.4 });
   }
-  function describeDealer(d) {
+  function pulseOf(d) {
     const range = (typeof getRange === 'function') ? getRange() : null;
     const eff = (typeof effectiveScore === 'function' && range) ? effectiveScore(d, range) : null;
-    const scoreTxt = eff && eff.score != null ? (typeof fmtScore5 === 'function' ? fmtScore5(eff.score) : eff.score.toFixed(1)) : null;
+    return eff && eff.score != null ? eff.score : null;
+  }
+  function fmtPulse(s) { return typeof fmtScore5 === 'function' ? fmtScore5(s) : s.toFixed(1); }
+  function describeDealer(d) {
+    const scoreTxt = (() => { const s = pulseOf(d); return s == null ? null : fmtPulse(s); })();
     const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
     if (scoreTxt == null) return `Here is ${d.short_name}, a ${where}. No reviews captured yet in the current range.`;
     const gmap = d.gmaps_rating != null ? ` Google rating ${d.gmaps_rating.toFixed(1)} from ${d.gmaps_total_reviews || '?'} reviews.` : '';
@@ -2800,13 +2804,140 @@ render();
   }
   function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+  // ----- A3: city-level aggregation -----
+  // Colloquial names → canonical city name in DASHBOARD_DATA.
+  const CITY_ALIASES = {
+    'vizag': 'visakhapatnam', 'vskp': 'visakhapatnam', 'waltair': 'visakhapatnam',
+    'hyd': 'hyderabad',
+    'vij': 'vijayawada', 'bezawada': 'vijayawada',
+    'skl': 'srikakulam',
+    'vzm': 'vizianagaram'
+  };
+  // Precompute the set of city names (lowercased) present in the data.
+  const CITY_SET = (() => {
+    const s = new Set();
+    (DASHBOARD_DATA.dealers || []).forEach(d => { if (d.city) s.add(norm(d.city)); });
+    return s;
+  })();
+  function findCityInQuery(q) {
+    const tokens = norm(q).split(' ').filter(Boolean);
+    if (!tokens.length) return null;
+    // Try 2-token windows first (e.g. "sri kakulam"), then single tokens.
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const two = tokens[i] + ' ' + tokens[i+1];
+      if (CITY_SET.has(two)) return two;
+      const aliased = CITY_ALIASES[two];
+      if (aliased && CITY_SET.has(aliased)) return aliased;
+    }
+    for (const t of tokens) {
+      if (CITY_SET.has(t)) return t;
+      const aliased = CITY_ALIASES[t];
+      if (aliased && CITY_SET.has(aliased)) return aliased;
+    }
+    return null;
+  }
+  function dealersInCity(cityNorm) {
+    const list = [];
+    (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
+      if (norm(d.city) === cityNorm) list.push({ i, d });
+    });
+    return list;
+  }
+  const DIVISION_TOKENS = [
+    ['arena', 'arena'], ['nexa', 'nexa'], ['commercial', 'commercial'],
+    ['service', 'service'], ['servicing', 'service'],
+    ['true value', 'true_value'], ['truevalue', 'true_value'], ['used', 'true_value']
+  ];
+  function divisionFilterFromQuery(q) {
+    const n = norm(q);
+    for (const [tok, div] of DIVISION_TOKENS) {
+      if (new RegExp(`\\b${tok}\\b`).test(n)) return div;
+    }
+    return null;
+  }
+  const AGG_BEST  = /\b(best|top|highest|leader|top\s*rated|top\s*rate|flagship)\b/;
+  const AGG_WORST = /\b(worst|bottom|lowest|weakest|poor|poorest)\b/;
+  const AGG_COUNT = /\b(how\s*many|count|number\s*of|total)\b/;
+  function zoomToDealers(list) {
+    if (!list.length || typeof map === 'undefined') return;
+    const bounds = L.latLngBounds(list.map(({ d }) => [d.lat, d.lng]));
+    map.flyToBounds(bounds, { padding: [60, 60], duration: 0.6, maxZoom: 13 });
+  }
+  function divBreakdown(list) {
+    const c = { arena: 0, nexa: 0, commercial: 0, service: 0, true_value: 0 };
+    for (const { d } of list) if (c[d.division] != null) c[d.division]++;
+    return Object.entries(c)
+      .filter(([, n]) => n > 0)
+      .map(([k, n]) => `${n} ${DIV_LABEL[k]}`)
+      .join(', ');
+  }
+  function citySummaryLine(cityTitle, list) {
+    const scored = list.map(x => ({ ...x, s: pulseOf(x.d) })).filter(x => x.s != null);
+    scored.sort((a, b) => b.s - a.s);
+    const top = scored[0];
+    const gmap = [...list]
+      .filter(({ d }) => d.gmaps_rating != null)
+      .sort((a, b) => (b.d.gmaps_rating - a.d.gmaps_rating) || ((b.d.gmaps_total_reviews||0) - (a.d.gmaps_total_reviews||0)))[0];
+    let line = `Varun Motors has ${list.length} outlets in ${cityTitle}: ${divBreakdown(list)}.`;
+    if (top) line += ` Top pulse: ${top.d.short_name} ${DIV_LABEL[top.d.division]} at ${fmtPulse(top.s)}.`;
+    if (gmap && gmap.d.gmaps_rating != null) {
+      line += ` Google favourite: ${gmap.d.short_name} at ${gmap.d.gmaps_rating.toFixed(1)} from ${gmap.d.gmaps_total_reviews || '?'} reviews.`;
+    }
+    return line;
+  }
+
   // ----- The router -----
   function handleUtterance(text) {
     const q = (text || '').trim();
     if (!q) return;
-    // A1: any utterance with at least one content token is treated as a
-    // place-name lookup. Bare names like "Vijayawada" or "Gajuwaka Arena"
-    // work without a verb prefix.
+    const nq = norm(q);
+
+    // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
+    // "Visakhapatnam" gives an overview instead of picking one weird outlet
+    // whose short_name happens to contain the city.
+    const cityKey = findCityInQuery(q);
+    if (cityKey) {
+      const all = dealersInCity(cityKey);
+      if (all.length) {
+        const cityTitle = all[0].d.city;
+        const divFilter = divisionFilterFromQuery(q);
+        const scoped = divFilter ? all.filter(({ d }) => d.division === divFilter) : all;
+
+        if (AGG_COUNT.test(nq)) {
+          zoomToDealers(scoped);
+          const label = divFilter ? `${DIV_LABEL[divFilter]} outlets` : `outlets`;
+          return showAnswer(`Varun Motors has ${scoped.length} ${label} in ${cityTitle}${divFilter ? '' : ': ' + divBreakdown(scoped)}.`);
+        }
+        if (AGG_BEST.test(nq) || AGG_WORST.test(nq)) {
+          const scored = scoped.map(x => ({ ...x, s: pulseOf(x.d) })).filter(x => x.s != null);
+          if (!scored.length) return showAnswer(`No pulse scores available in ${cityTitle} for the current time range.`);
+          const asc = AGG_WORST.test(nq);
+          scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
+          const pick = scored[0];
+          openDealer(pick.i);
+          const verb = asc ? 'Weakest' : 'Top';
+          return showAnswer(`${verb} outlet in ${cityTitle}: ${pick.d.short_name} ${DIV_LABEL[pick.d.division]}, pulse ${fmtPulse(pick.s)}.`);
+        }
+        if (divFilter) {
+          if (!scoped.length) return showAnswer(`No ${DIV_LABEL[divFilter]} outlets in ${cityTitle}.`);
+          if (scoped.length === 1) { openDealer(scoped[0].i); return showAnswer(describeDealer(scoped[0].d)); }
+          zoomToDealers(scoped);
+          const names = scoped.map(({ d }) => d.short_name).join(', ');
+          return showAnswer(`${scoped.length} ${DIV_LABEL[divFilter]} outlets in ${cityTitle}: ${names}.`);
+        }
+        // Bare city with 2+ outlets → summary (avoids picking a Service center
+        // whose short_name happens to contain the city).
+        if (all.length >= 2) {
+          zoomToDealers(all);
+          return showAnswer(citySummaryLine(cityTitle, all));
+        }
+        // Single outlet in the city → just open it.
+        openDealer(all[0].i);
+        return showAnswer(describeDealer(all[0].d));
+      }
+    }
+
+    // A1: outlet-name lookup for anything that isn't a city.
     const match = findOutlet(q);
     if (match) {
       openDealer(match.i);
@@ -2817,7 +2948,7 @@ render();
       showAnswer(line);
       return;
     }
-    showAnswer(`Sorry, I did not find a match for "${q}". Try an outlet, city, or division like "Gajuwaka", "Vijayawada Nexa", or "Madhapur service".`);
+    showAnswer(`Sorry, I did not find a match for "${q}". Try an outlet or city like "Gajuwaka", "Visakhapatnam", or "best in Hyderabad".`);
   }
 })();
 </script>
