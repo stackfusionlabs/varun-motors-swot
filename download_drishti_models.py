@@ -132,7 +132,9 @@ def download(url: str, dst: Path, optional: bool = False) -> bool:
     except urllib.error.HTTPError as e:
         if tmp.exists():
             tmp.unlink()
-        if optional and e.code == 404:
+        # HuggingFace returns 401 for missing paths in public repos (not 404).
+        # Treat 401 the same as 404 when the file is marked optional.
+        if optional and e.code in (401, 403, 404):
             print(f"  · {rel}  [optional, not in repo — skipped]")
             return True
         print(f"\n  ✗ {rel}  HTTP {e.code}: {url}", file=sys.stderr)
@@ -177,17 +179,35 @@ def fetch_llm_shards() -> bool:
     shard_items = [(f"https://huggingface.co/{LLM_REPO}/resolve/main/{s}",
                     MODELS / LLM_REPO / s) for s in shard_names]
 
-    # Also fetch the compiled WebGPU library. WebLLM looks up the URL per
-    # model in the app config — the .wasm lives under mlc-ai/binary-mlc-llm-libs.
-    LIB_REPO = "mlc-ai/binary-mlc-llm-libs"
-    LIB_PATH = "web-llm-models/v0_2_48/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm"
-    shard_items.append((f"https://huggingface.co/{LIB_REPO}/resolve/main/{LIB_PATH}",
-                        MODELS / LIB_REPO / LIB_PATH))
-
     ok = True
     for url, dst in shard_items:
         if not download(url, dst):
             ok = False
+
+    # WebLLM's compiled WebGPU library (~5 MB). The URL path changes between
+    # WebLLM versions and MLC's binary repo has multiple layouts. Try several
+    # candidates; the browser can also fetch it at runtime if all fail here.
+    LIB_REPO = "mlc-ai/binary-mlc-llm-libs"
+    LIB_CANDIDATES = [
+        f"web-llm-models/v0_2_48/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        f"web-llm-models/v0_2_79/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+        f"Llama-3.2-1B-Instruct/Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm",
+    ]
+    lib_dst = MODELS / LIB_REPO / "Llama-3.2-1B-Instruct-q4f16_1-ctx4k_cs1k-webgpu.wasm"
+    if lib_dst.exists() and lib_dst.stat().st_size > 0:
+        print(f"  ✓ {lib_dst.relative_to(ROOT)}  ({human(lib_dst.stat().st_size).strip()})  [cached]")
+    else:
+        lib_ok = False
+        for path in LIB_CANDIDATES:
+            url = f"https://huggingface.co/{LIB_REPO}/resolve/main/{path}"
+            if download(url, lib_dst, optional=True):
+                if lib_dst.exists() and lib_dst.stat().st_size > 0:
+                    lib_ok = True
+                    break
+        if not lib_ok:
+            print("  · WebGPU library not found under any known path.")
+            print("    OK for now — Tier-3 LLM lands in Phase 4; we'll pin the correct")
+            print("    URL then. Whisper + MiniLM + LLM shards are all ready.")
     return ok
 
 
