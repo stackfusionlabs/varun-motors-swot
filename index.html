@@ -3453,15 +3453,24 @@ render();
   let lastList = null;      // { kind:'best'|'worst', cityTitle, picks:[{i,d,s}] }
   let lastWasList = false;  // was the last answer a ranking (vs a single outlet)?
 
-  // Push a newly-focused outlet/city onto the 2-deep context stack.
+  // ----- Context stack (location + aspect/emotion) -----
+  // Location focus levels: ALL (network) > city > outlet. A location-level
+  // question with no explicit place applies to the most specific focus.
+  //   • name an outlet  → focus that outlet (its city becomes the city context)
+  //   • name a city      → focus that city, POP any outlet
+  //   • "all/network"    → reset to ALL (pop city + outlet)
+  // Aspect + emotion are two sticky slots: each persists until the query changes
+  // it. Changing only the aspect keeps the emotion; "otherwise" flips the emotion.
   function setOutletCtx(m) {
     if (m && (!lastOutlet || lastOutlet.i !== m.i)) prevOutlet = lastOutlet;
     lastOutlet = m; lastWasList = false;
+    if (m && m.d && m.d.city) lastCity = norm(m.d.city);
   }
   function setCityCtx(c) {
-    if (c && c !== lastCity) prevCity = lastCity;
+    if (c && c !== lastCity) { prevCity = lastCity; prevOutlet = lastOutlet; lastOutlet = null; }
     lastCity = c;
   }
+  function resetToAll() { prevOutlet = lastOutlet; prevCity = lastCity; lastOutlet = null; lastCity = null; }
   // For a follow-up aspect question with no named outlet: prefer the most recent
   // outlet that actually has data for that aspect, else fall back to the last one.
   function recallOutletForAspect(aspectKey) {
@@ -3474,7 +3483,21 @@ render();
   }
   function recallCity() { return lastCity || prevCity || null; }
 
+  // Aspect + emotion slots.
+  let ctxAspect = null;          // 'staff' | 'service_quality' | ...
+  let ctxEmotion = null;         // 'pos' | 'neg' | null (neutral = show both)
+  const OTHERWISE_RX = /\b(otherwise|other\s+way|the\s+other\s+way|instead|conversely|on\s+the\s+other\s+hand|flip\s+it|reverse)\b/;
+  const FOLLOWUP_RX  = /^(how|what)\s+about\b|^and\b/;
+  function detectEmotion(nq) {
+    if (/\b(good|best|great|positive|strength|strengths|praise|top|highest|excellent)\b/.test(nq)) return 'pos';
+    if (/\b(bad|worst|poor|negative|complaint|complaints|issue|issues|problem|problems|weak|weakness|lowest)\b/.test(nq)) return 'neg';
+    return null;
+  }
+
+
   const WALK_RX    = /\b(walk\s+me\s+through|walkthrough|tell\s+me\s+about|give\s+me\s+a\s+tour|run\s+me\s+through)\b/;
+  const NAV_RX     = /\b(take\s+me\s+to|go\s+to|navigate\s+to|jump\s+to|drive\s+to|open\s+up)\b|^open\s+/;
+  const CHITCHAT_RX = /\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+do\s+you\s+do|what'?s\s+up|are\s+you\s+there|you\s+there)\b/;
   const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
   const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
   const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
@@ -3536,12 +3559,13 @@ render();
     return null;
   }
   // Split a query on connectors and resolve each candidate to an outlet.
+  // A pronoun ("it/that/this") resolves to the current outlet in focus.
   function gatherOutlets(q, max) {
-    const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|and|or|better\s+than|better|worse|walk\s+me\s+through|walkthrough|tell\s+me\s+about|then|also|run\s+me\s+through)\b/i)
-      .map(s => s.trim()).filter(s => s.length > 2);
+    const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|with|and|or|better\s+than|better|worse|walk\s+me\s+through|walkthrough|tell\s+me\s+about|then|also|run\s+me\s+through)\b/i)
+      .map(s => s.trim()).filter(s => s.length > 1);
     const found = [];
     for (const p of parts) {
-      const m = findOutlet(p) || fuzzyFindOutlet(p);
+      let m = /^(it|its|that|this|same)$/i.test(p) ? lastOutlet : (findOutlet(p) || fuzzyFindOutlet(p));
       if (m && !found.some(f => f.i === m.i)) { found.push(m); if (found.length >= max) break; }
     }
     return found;
@@ -3581,6 +3605,39 @@ render();
     setOutletCtx(matches[matches.length - 1]);
     speakWalkthrough(parts);
   }
+  // Spoken ranking: open each ranked outlet as it's named. Preserves list context
+  // so a follow-up "why?" still works.
+  function rankingWalkthrough(picks, metricLabel, kind, scopeTitle) {
+    openDealer(picks[0].i);
+    const verb = kind === 'worst' ? 'Weakest' : 'Top';
+    const parts = [{ text: `${verb} ${picks.length} in ${scopeTitle}, by ${metricLabel}.`, onStart: () => openDealer(picks[0].i) }];
+    picks.forEach((p, idx) => parts.push({
+      text: `Number ${idx + 1}, ${p.d.short_name}, ${DIV_LABEL[p.d.division]} in ${p.d.city}, ${metricLabel} ${p.sTxt}.`,
+      onStart: () => openDealer(p.i)
+    }));
+    lastList = { kind, cityTitle: scopeTitle, metricLabel, picks }; lastWasList = true;
+    speakWalkthrough(parts);
+  }
+  // "walk me through all Arena in Vizag" — open each, then top & bottom 3.
+  function walkthroughAllInCity(list, cityTitle, divFilter) {
+    const { metricLabel, fmt, scored } = rankList(list);
+    scored.sort((a, b) => b.s - a.s);
+    const withTxt = scored.map(p => ({ ...p, sTxt: fmt(p.s) }));
+    openDealer(withTxt.length ? withTxt[0].i : list[0].i);
+    const label = divFilter ? DIV_LABEL[divFilter] + ' outlets' : 'outlets';
+    const parts = [{ text: `Walking through ${list.length} ${label} in ${cityTitle}.`, onStart: () => zoomToDealers(list) }];
+    withTxt.forEach(p => parts.push({
+      text: `${p.d.short_name}, ${metricLabel} ${p.sTxt}.`,
+      onStart: () => openDealer(p.i)
+    }));
+    if (withTxt.length > 3) {
+      const top = withTxt.slice(0, 3).map(p => p.d.short_name).join(', ');
+      const bot = withTxt.slice(-3).reverse().map(p => p.d.short_name).join(', ');
+      parts.push({ text: `Top 3: ${top}. Bottom 3: ${bot}.`, onStart: () => zoomToDealers(list) });
+    }
+    lastList = { kind: 'best', cityTitle, metricLabel, picks: withTxt }; lastWasList = true;
+    speakWalkthrough(parts);
+  }
 
   // ----- The router -----
   function handleUtterance(text) {
@@ -3594,8 +3651,20 @@ render();
   function handleUtteranceRules(q, nq) {
     // A4.a: greeting (bye is handled by the caller).
     if (GREET_RX.test(q)) return showAnswer("Hello! I'm Drishti. Ask about an outlet, city, or say 'help' to see what I can do.");
+    // Small talk.
+    if (CHITCHAT_RX.test(nq)) return showAnswer("I'm doing great and ready to dig into Varun Motors' network. Ask me about any outlet, city, best or worst, or how customers feel.");
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
+
+    // Navigate-only: "take me to / go to / open X" → open it and invite a question,
+    // no unsolicited explanation.
+    if (NAV_RX.test(nq)) {
+      const scrubbed = norm(q).replace(/\b(take|me|to|go|navigate|jump|drive|open|up|the|please|just|show)\b/g, ' ').replace(/\s+/g, ' ').trim();
+      const ck = findCityInQuery(scrubbed);
+      if (ck) { const list = dealersInCity(ck); if (list.length) { setCityCtx(ck); zoomToDealers(list); return showAnswer(`Here's ${list[0].d.city}. What would you like to know — best, worst, counts, or feedback?`); } }
+      const nm = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      if (nm) { openDealer(nm.i); setOutletCtx(nm); return showAnswer(`You're at ${nm.d.short_name}, ${DIV_LABEL[nm.d.division]} in ${nm.d.city}. What would you like to know — ratings, staff, complaints, or strengths?`); }
+    }
 
     // "Why?" follow-up on the last answer (uses conversational memory).
     if (WHY_RX.test(nq) && (nq.split(' ').length <= 8 || PRONOUN_RX.test(nq)) && (lastWasList ? lastList : lastOutlet)) {
@@ -3603,8 +3672,19 @@ render();
     }
     // Locate: "where is X" / "which city is X" (before city aggregation).
     if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
+    // "walk me through all Arena in Vizag" → open each in the city (optionally a
+    // division), then read top & bottom 3.
+    if (WALK_RX.test(nq)) {
+      const wcity = findCityInQuery(q);
+      if (wcity && (divisionFilterFromQuery(q) || /\ball\b/.test(nq))) {
+        const wdiv = divisionFilterFromQuery(q);
+        let list = dealersInCity(wcity);
+        if (wdiv) list = list.filter(x => x.d.division === wdiv);
+        if (list.length) { setCityCtx(wcity); walkthroughAllInCity(list, list[0].d.city, wdiv); return; }
+      }
+    }
     // Comparative / single walkthrough: "walk me through X and Y", "X vs Y",
-    // "is X better or Y", "tell me about X".
+    // "is X better or Y", "compare it with Y", "tell me about X".
     if (WALK_RX.test(nq) || COMPARE_RX.test(nq)) {
       const outs = gatherOutlets(q, 4);
       if (outs.length >= 2) { walkthroughDealers(outs); return; }
@@ -3655,48 +3735,50 @@ render();
       const n = parseTopN(nq) || 1;
       const picks = scored.slice(0, n).map(p => ({ ...p, sTxt: fmt(p.s) }));
       const scopeLbl = divFilter ? `${DIV_LABEL[divFilter]} outlet` : 'outlet';
-      lastList = { kind: asc ? 'worst' : 'best', cityTitle: 'the network', metricLabel, picks }; lastWasList = true;
       if (picks.length === 1) {
+        lastList = { kind: asc ? 'worst' : 'best', cityTitle: 'the network', metricLabel, picks }; lastWasList = true;
         openDealer(picks[0].i); setOutletCtx(picks[0]); lastWasList = false;
         return showAnswer(`${asc ? 'Weakest' : 'Top'} ${scopeLbl} network-wide: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]} in ${picks[0].d.city}, ${metricLabel} ${picks[0].sTxt}.`);
       }
-      zoomToDealers(picks);
-      return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} ${divFilter ? DIV_LABEL[divFilter] + ' ' : ''}network-wide by ${metricLabel}: ${picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} (${p.d.city}, ${p.sTxt})`).join('; ')}.`);
+      rankingWalkthrough(picks, metricLabel, asc ? 'worst' : 'best', divFilter ? DIV_LABEL[divFilter] + ' network-wide' : 'the network');
+      return;
     }
 
-    // A4.c: aspect (ABSA) intent — fires when an aspect word or complaint
-    // word is present AND we can resolve an outlet or city in the query.
-    const aspectKey = detectAspect(q);
+    // A4.c: aspect (ABSA) intent with sticky aspect + emotion context.
+    const qAspect = detectAspect(q);
+    const isFollowup = FOLLOWUP_RX.test(nq) || OTHERWISE_RX.test(nq);
+    // Carry the last aspect on a follow-up — but NOT for a bare ranking follow-up
+    // ("and the worst"), which should rank outlets, not the carried aspect.
+    const bareRanking = (AGG_BEST.test(nq) || AGG_WORST.test(nq)) && !qAspect;
+    const aspectKey = qAspect || ((isFollowup && ctxAspect && !bareRanking) ? ctxAspect : null);
     const isComplaint = COMPLAINT_RX.test(nq);
-    // Enter the aspect/complaint block for an explicit aspect or a HARD complaint
-    // word. Bare "worst"/"weak" fall through to the best/worst ranking below, and
-    // a count intent ("how many service centers") wins over aspect.
     if ((aspectKey || COMPLAINT_HARD_RX.test(nq)) && !AGG_COUNT.test(nq)) {
-      // Strip the aspect word from the query before resolving the outlet
-      // so it doesn't pollute the score. "how are staff in Gajuwaka" → outlet is Gajuwaka.
+      // Emotion: explicit wins; "otherwise" flips the current one; a follow-up
+      // ("how about X") carries the current emotion; else neutral (show both).
+      let emotion = detectEmotion(nq);
+      if (OTHERWISE_RX.test(nq)) emotion = (ctxEmotion === 'neg' ? 'pos' : 'neg');
+      else if (!emotion && isFollowup) emotion = ctxEmotion;
+      ctxEmotion = emotion;
+      if (aspectKey) ctxAspect = aspectKey;
+      const wantNeg = (emotion === 'neg') || (isComplaint && emotion !== 'pos');
+
       const scrubbed = norm(q).split(' ').filter(t => !ASPECT_MAP[t] && !COMPLAINT_RX.test(t)).join(' ');
-      const cityKey = findCityInQuery(scrubbed);
-      if (cityKey) {
-        const list = dealersInCity(cityKey);
-        if (list.length) {
-          const cityTitle = list[0].d.city;
-          setCityCtx(cityKey);
-          zoomToDealers(list);
-          return showAnswer(respondAspectForCity(aspectKey, isComplaint, cityTitle, list));
-        }
+      const qCity = findCityInQuery(scrubbed);
+      if (qCity) {
+        const list = dealersInCity(qCity);
+        if (list.length) { setCityCtx(qCity); zoomToDealers(list); return showAnswer(respondAspectForCity(aspectKey, wantNeg, list[0].d.city, list)); }
       }
-      let outletMatch = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
-      // Conversational fallback: "which staff was mentioned" / "and the service?"
-      // with no named outlet → look back up to 2 turns for an outlet with that data.
-      if (!outletMatch) outletMatch = aspectKey ? recallOutletForAspect(aspectKey) : (lastOutlet || prevOutlet);
-      if (outletMatch) {
-        openDealer(outletMatch.i);
-        setOutletCtx(outletMatch);
-        const line = respondAspectForDealer(aspectKey, isComplaint, outletMatch.d);
-        if (line) return showAnswer(line);
+      const om = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      if (om) { openDealer(om.i); setOutletCtx(om); const line = respondAspectForDealer(aspectKey, wantNeg, om.d); if (line) return showAnswer(line); }
+      // No location in the query → apply to the current focus (outlet, then city).
+      if (lastOutlet) {
+        const m = aspectKey ? recallOutletForAspect(aspectKey) : lastOutlet;
+        if (m) { openDealer(m.i); setOutletCtx(m); const line = respondAspectForDealer(aspectKey, wantNeg, m.d); if (line) return showAnswer(line); }
+      } else if (lastCity) {
+        const list = dealersInCity(lastCity);
+        if (list.length) { zoomToDealers(list); return showAnswer(respondAspectForCity(aspectKey, wantNeg, list[0].d.city, list)); }
       }
-      // Aspect word but no outlet/city to bind to.
-      if (aspectKey) return showAnswer(`Which outlet or city? Try "how is ${aspectKey} at Gajuwaka" or "${aspectKey} in Hyderabad".`);
+      if (aspectKey) return showAnswer(`Which outlet or city? Try "how is ${pretty(aspectKey)} at Gajuwaka" or "${pretty(aspectKey)} in Hyderabad".`);
     }
 
     // Strengths / positives — "what are strengths of X", "good things about X".
@@ -3722,6 +3804,20 @@ render();
       zoomToDealers(list);
       const label = divFilter ? `${DIV_LABEL[divFilter]} outlets` : 'outlets';
       return showAnswer(`Varun Motors has ${list.length} ${label} in ${STATE_LABEL[stateCode]}${divFilter ? '' : ': ' + divBreakdown(list)}.`);
+    }
+
+    // Count by division with no explicit city: "how many Arena" → use the city in
+    // focus if there is one, else the whole network.
+    if (AGG_COUNT.test(nq) && divisionFilterFromQuery(q) && !findCityInQuery(q) && !stateFromQuery(nq) && !isNetwork) {
+      const divFilter = divisionFilterFromQuery(q);
+      if (lastCity) {
+        const cityList = dealersInCity(lastCity);
+        const scoped = cityList.filter(x => x.d.division === divFilter);
+        zoomToDealers(scoped.length ? scoped : cityList);
+        return showAnswer(`Varun Motors has ${scoped.length} ${DIV_LABEL[divFilter]} outlet${scoped.length === 1 ? '' : 's'} in ${cityList[0].d.city}.`);
+      }
+      const netList = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d })).filter(x => x.d.division === divFilter);
+      return showAnswer(`Varun Motors has ${netList.length} ${DIV_LABEL[divFilter]} outlets across the network.`);
     }
 
     // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
@@ -3755,15 +3851,15 @@ render();
           scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
           const n = parseTopN(nq) || 1;
           const picks = scored.slice(0, n).map(p => ({ ...p, sTxt: fmt(p.s) }));
-          lastList = { kind: asc ? 'worst' : 'best', cityTitle, metricLabel, picks }; lastWasList = true;
           if (picks.length === 1) {
+            lastList = { kind: asc ? 'worst' : 'best', cityTitle, metricLabel, picks }; lastWasList = true;
             openDealer(picks[0].i);
             setOutletCtx(picks[0]);
             return showAnswer(`${asc ? 'Weakest' : 'Top'} outlet in ${cityTitle}: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]}, ${metricLabel} ${picks[0].sTxt}.`);
           }
-          zoomToDealers(picks);
-          const listStr = picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} ${DIV_LABEL[p.d.division]} (${p.sTxt})`).join('; ');
-          return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} in ${cityTitle} by ${metricLabel}: ${listStr}.`);
+          // Multiple → open each outlet in turn as it's named.
+          rankingWalkthrough(picks, metricLabel, asc ? 'worst' : 'best', cityTitle);
+          return;
         }
         if (divFilter) {
           if (!scoped.length) return showAnswer(`No ${DIV_LABEL[divFilter]} outlets in ${cityTitle}.`);
