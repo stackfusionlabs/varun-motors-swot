@@ -3441,6 +3441,44 @@ render();
     return line + '.';
   }
 
+  // People / entity intelligence — the data already tags named staff (entity_type
+  // "staff") per review with sentiment. We aggregate the real names (dropping
+  // generic role/brand words) so "who are the people mentioned" works.
+  const GENERIC_ENTITY_RX = /\b(staff|team|teams|sales|salesperson|department|departments|executive|executives|showroom|branch|delivery|loan|instructor|receiving|entire|company|companies|model|models|other|others|varun|motors|gajuwaka|gazuwaka|gwk|service|general|customer|customers|dealer|dealership|manager|management)\b/i;
+  function peopleOf(d) {
+    const map = {};
+    (d.absa_reviews || []).forEach(r => (r.items || []).forEach(it => {
+      // Named individuals show up as staff-category / staff-typed items.
+      if (it.category !== 'staff' && it.entity_type !== 'staff') return;
+      const e = (it.entity || '').trim();
+      if (!e || e.length < 3 || e.split(/\s+/).length > 2 || GENERIC_ENTITY_RX.test(e)) return;
+      if (!/[a-z]/i.test(e)) return;                 // must contain letters
+      const key = e.replace(/\b\w/g, c => c.toUpperCase());
+      map[key] = map[key] || { pos: 0, neg: 0 };
+      map[key][it.sentiment === 'negative' ? 'neg' : 'pos']++;
+    }));
+    return map;
+  }
+  function fmtPerson(name, c) {
+    return `${name} (${c.pos} positive${c.neg ? ', ' + c.neg + ' negative' : ''})`;
+  }
+  function respondPeopleForDealer(d) {
+    const ppl = peopleOf(d);
+    const names = Object.entries(ppl).sort((a, b) => (b[1].pos + b[1].neg) - (a[1].pos + a[1].neg));
+    const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    if (!names.length) return `No individual staff names were mentioned in reviews for ${d.short_name}, ${where}.`;
+    return `People mentioned at ${d.short_name}, ${where}: ${names.slice(0, 6).map(([n, c]) => fmtPerson(n, c)).join('; ')}.`;
+  }
+  function respondPeopleForCity(cityTitle, list) {
+    const map = {};
+    for (const { d } of list) for (const [n, c] of Object.entries(peopleOf(d))) {
+      map[n] = map[n] || { pos: 0, neg: 0 };
+      map[n].pos += c.pos; map[n].neg += c.neg;
+    }
+    const names = Object.entries(map).sort((a, b) => (b[1].pos + b[1].neg) - (a[1].pos + a[1].neg));
+    if (!names.length) return `No individual staff names were captured across ${cityTitle}.`;
+    return `People mentioned across ${cityTitle}: ${names.slice(0, 6).map(([n, c]) => fmtPerson(n, c)).join('; ')}.`;
+  }
   function handleLocate(q) {
     const scrubbed = norm(q).replace(/\b(where|wheres|is|are|which|what|city|cities|located|location|of|in|the|present|find|tell|me|does|do|situated)\b/g, ' ').replace(/\s+/g, ' ').trim();
     // City first, so "which city is Srikakulam" answers the city (not Nexa Srikakulam).
@@ -3516,6 +3554,7 @@ render();
   const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|how\s+are\s+things|how\s+is\s+it\s+going|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
   const CHITCHAT_RX = /\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+(are\s+|ya\s+|you\s+)?doing|how\s+do\s+you\s+do|what'?s\s+up|are\s+you\s+there|you\s+there)\b/;
   const RATING_RX = /^(ratings?|reviews?|scores?|pulse|how\s+is\s+it\s+rated|rating)\b[\s!.?]*$/;
+  const PEOPLE_RX = /\b(who\s+are\s+the\s+people|people\s+mentioned|who\s+(is|are|was|were)\s+mentioned|which\s+(staff|people|employees?|salesperson)|names?\s+mentioned|any\s+names|who\s+works|staff\s+members?|salespeople|sales\s+people|who\s+should\s+i\s+(ask|talk|meet)|which\s+person)\b/;
   const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
   const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
 
@@ -3723,6 +3762,15 @@ render();
     }
     // Locate: "where is X" / "which city is X" (before city aggregation).
     if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
+    // People / entities: "who are the people mentioned", "which staff", "salespeople".
+    if (PEOPLE_RX.test(nq)) {
+      const ck = findCityInQuery(q);
+      if (ck) { const list = dealersInCity(ck); if (list.length) { setCityCtx(ck); zoomToDealers(list); return showAnswer(list.length === 1 ? respondPeopleForDealer(list[0].d) : respondPeopleForCity(list[0].d.city, list)); } }
+      const ns = nameScrub(q);
+      const pm = (ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null) || lastOutlet;
+      if (pm) { openDealer(pm.i); setOutletCtx(pm); return showAnswer(respondPeopleForDealer(pm.d)); }
+      if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(respondPeopleForCity(list[0].d.city, list)); } }
+    }
     // "walk me through all Arena in Vizag" / "walk me through Visakhapatnam" →
     // open each outlet in the city (optionally a division), then read top & bottom 3.
     if (WALK_RX.test(nq)) {
