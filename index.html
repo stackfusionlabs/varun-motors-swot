@@ -3501,6 +3501,7 @@ render();
   // Aspect + emotion slots.
   let ctxAspect = null;          // 'staff' | 'service_quality' | ...
   let ctxEmotion = null;         // 'pos' | 'neg' | null (neutral = show both)
+  let ctxAgg = null;             // 'best' | 'worst' — last ranking direction (for "in service" follow-ups)
   const OTHERWISE_RX = /\b(otherwise|other\s+way|the\s+other\s+way|instead|conversely|on\s+the\s+other\s+hand|flip\s+it|reverse)\b/;
   const FOLLOWUP_RX  = /^(how|what)\s+about\b|^and\b/;
   function detectEmotion(nq) {
@@ -3672,6 +3673,21 @@ render();
     }
     lastList = { kind: 'best', cityTitle, metricLabel, picks: withTxt }; lastWasList = true;
     speakWalkthrough(parts);
+  }
+  // Shared ranking: best/worst of a list, single or sequential walkthrough.
+  function doRanking(list, asc, n, scopeTitle) {
+    const { metricLabel, fmt, scored } = rankList(list);
+    if (!scored.length) { showAnswer(`No ratings available in ${scopeTitle}.`); return; }
+    scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
+    const picks = scored.slice(0, n).map(p => ({ ...p, sTxt: fmt(p.s) }));
+    ctxAgg = asc ? 'worst' : 'best';
+    if (picks.length === 1) {
+      lastList = { kind: ctxAgg, cityTitle: scopeTitle, metricLabel, picks }; lastWasList = true;
+      openDealer(picks[0].i); setOutletCtx(picks[0]);
+      showAnswer(`${asc ? 'Weakest' : 'Top'} outlet in ${scopeTitle}: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]}, ${metricLabel} ${picks[0].sTxt}.`);
+      return;
+    }
+    rankingWalkthrough(picks, metricLabel, ctxAgg, scopeTitle);
   }
 
   // ----- The router -----
@@ -3866,6 +3882,30 @@ render();
       return showAnswer(`Varun Motors has ${netList.length} ${DIV_LABEL[divFilter]} outlets across the network.`);
     }
 
+    // Rank by division with no explicit city: "best outlet in Arena" → focus city
+    // if any, else network. ("in Arena" = the division, not a place.)
+    if ((AGG_BEST.test(nq) || AGG_WORST.test(nq)) && divisionFilterFromQuery(q) && !findCityInQuery(q) && !stateFromQuery(nq) && !isNetwork) {
+      const divFilter = divisionFilterFromQuery(q);
+      const asc = AGG_WORST.test(nq);
+      const n = parseTopN(nq) || 1;
+      if (lastCity) {
+        const scoped = dealersInCity(lastCity).filter(x => x.d.division === divFilter);
+        if (scoped.length) { doRanking(scoped, asc, n, `${DIV_LABEL[divFilter]} in ${dealersInCity(lastCity)[0].d.city}`); return; }
+      }
+      const netList = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d })).filter(x => x.d.division === divFilter);
+      doRanking(netList, asc, n, `${DIV_LABEL[divFilter]} network-wide`);
+      return;
+    }
+
+    // Bare-division follow-up: "in service" / "true value" after "best in Vizag"
+    // → carry the last ranking direction + city, filtered to that division.
+    if (divisionFilterFromQuery(q) && !AGG_BEST.test(nq) && !AGG_WORST.test(nq) && !AGG_COUNT.test(nq) &&
+        !findCityInQuery(q) && !nameScrub(q) && lastCity) {
+      const divFilter = divisionFilterFromQuery(q);
+      const scoped = dealersInCity(lastCity).filter(x => x.d.division === divFilter);
+      if (scoped.length) { doRanking(scoped, ctxAgg === 'worst', 1, `${DIV_LABEL[divFilter]} in ${dealersInCity(lastCity)[0].d.city}`); return; }
+    }
+
     // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
     // "Visakhapatnam" gives an overview instead of picking one weird outlet
     // whose short_name happens to contain the city.
@@ -3892,6 +3932,7 @@ render();
         }
         if (AGG_BEST.test(nq) || AGG_WORST.test(nq)) {
           const asc = AGG_WORST.test(nq);
+          ctxAgg = asc ? 'worst' : 'best';
           const { metricLabel, fmt, scored } = rankList(scoped);
           if (!scored.length) return showAnswer(`No ratings available in ${cityTitle} for the current selection.`);
           scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
