@@ -3211,10 +3211,11 @@ render();
   const BYE_RX   = /^((bye|goodbye|thanks|thank\s+you|cheers)[\s,!.?-]*)+(drishti|drishthi)?[\s!.?]*$/i;
 
   function detectAspect(q) {
-    // Note: "service" is also a division word — the router checks aspect
-    // intent only when NO explicit city/division-only query is present, and
-    // the caller passes through `findOutlet` on the stripped query anyway.
-    for (const t of norm(q).split(' ')) if (ASPECT_MAP[t]) return ASPECT_MAP[t];
+    const n = norm(q);
+    for (const t of n.split(' ')) if (ASPECT_MAP[t]) return ASPECT_MAP[t];
+    // "service" is ambiguous (division vs aspect) — treat as the service-quality
+    // aspect only in a quality-question context ("how is service", "service is bad").
+    if (/\bservice\b/.test(n) && /\b(how|quality|rate|rating|good|bad|poor|great)\b/.test(n)) return 'service_quality';
     return null;
   }
   // The ABSA categorizer sometimes files a mention under a different bucket than
@@ -3313,7 +3314,16 @@ render();
         if (!worstOutlet || cat.score < worstOutlet.s) worstOutlet = { d, s: cat.score };
       }
     }
-    if (!pos && !neg) return `No ${pretty(aspectKey)} feedback captured across ${cityTitle}.`;
+    if (!pos && !neg) {
+      // No structured category anywhere — fall back to scanning review mentions.
+      let mpos = 0, mneg = 0; const samples = [];
+      for (const { d } of list) for (const m of mentionsForAspect(d, aspectKey)) {
+        if (m.sentiment === 'negative') { mneg++; if (samples.length < 2) samples.push(`"${m.text}"`); }
+        else if (m.sentiment === 'positive') mpos++;
+      }
+      if (mpos || mneg) return `On ${pretty(aspectKey)} across ${cityTitle}: ${mpos} positive, ${mneg} negative review mentions.${samples.length ? ' For example ' + samples.join(', ') + '.' : ''}`;
+      return `No ${pretty(aspectKey)} feedback captured across ${cityTitle}.`;
+    }
     const avg = weight ? (weighted / weight).toFixed(1) : '?';
     let line = `${cap(pretty(aspectKey))} across ${cityTitle}: ${pos} positive vs ${neg} negative mentions, weighted score ${avg}/10.`;
     if (bestOutlet && worstOutlet && bestOutlet.d !== worstOutlet.d) {
@@ -3465,7 +3475,7 @@ render();
   function recallCity() { return lastCity || prevCity || null; }
 
   const WALK_RX    = /\b(walk\s+me\s+through|walkthrough|tell\s+me\s+about|give\s+me\s+a\s+tour|run\s+me\s+through)\b/;
-  const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b)\b/;
+  const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
   const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
   const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
 
@@ -3588,7 +3598,7 @@ render();
     if (HELP_RX.test(nq)) return showAnswer(helpText());
 
     // "Why?" follow-up on the last answer (uses conversational memory).
-    if ((WHY_RX.test(nq)) && nq.split(' ').length <= 5 && (lastWasList ? lastList : lastOutlet)) {
+    if (WHY_RX.test(nq) && (nq.split(' ').length <= 8 || PRONOUN_RX.test(nq)) && (lastWasList ? lastList : lastOutlet)) {
       const r = explainWhy(); if (r) return showAnswer(r);
     }
     // Locate: "where is X" / "which city is X" (before city aggregation).
@@ -3614,25 +3624,44 @@ render();
           return showAnswer(list.length === 1 ? respondOutletInsight(list[0].d) : respondCityInsight(list[0].d.city, list));
         }
       }
-      const im = findOutlet(q) || fuzzyFindOutlet(q) || (PRONOUN_RX.test(nq) ? (lastOutlet || prevOutlet) : null);
+      const im = findOutlet(q) || (function () {
+        // Scrub insight/filler words so a fuzzy match keys off the real name
+        // ("focus areas of marry palam" → Marripalem, not Palakonda).
+        const scrubbed = norm(q).replace(/\b(what|whats|happening|impactful|focus|areas?|things?|to|the|of|on|about|is|in|for|me|tell|show|needs?|attention|concern|worried|worry|insights?|weakness|weaknesses|weak|downsides?|drawbacks?|cons|deep|dive|do|improve|should|know|its|it)\b/g, ' ').replace(/\s+/g, ' ').trim();
+        return scrubbed ? fuzzyFindOutlet(scrubbed) : null;
+      })() || (PRONOUN_RX.test(nq) ? (lastOutlet || prevOutlet) : null);
       if (im) { openDealer(im.i); setOutletCtx(im); return showAnswer(respondOutletInsight(im.d)); }
     }
 
+    // Network-wide scope: "in the whole network / overall / total / entire group".
+    const isNetwork = /\b(network|overall|entire|everywhere|company|whole\s+group|all\s+outlets|anywhere|in\s+all|total|do\s+we\s+have|we\s+have)\b/.test(nq) && !findCityInQuery(q) && !stateFromQuery(nq);
+    // Global count: "how many total outlets do we have".
+    if (AGG_COUNT.test(nq) && isNetwork) {
+      const divFilter = divisionFilterFromQuery(q);
+      let all = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d }));
+      if (divFilter) all = all.filter(x => x.d.division === divFilter);
+      const label = divFilter ? `${DIV_LABEL[divFilter]} outlets` : 'outlets';
+      return showAnswer(`Varun Motors has ${all.length} ${label} in total${divFilter ? '' : ': ' + divBreakdown(all)}.`);
+    }
     // Global ranking: "best in the whole network / overall / entire group".
-    if ((AGG_BEST.test(nq) || AGG_WORST.test(nq)) && /\b(network|overall|entire|everywhere|company|whole\s+group|all\s+outlets|anywhere)\b/.test(nq) && !findCityInQuery(q)) {
+    if ((AGG_BEST.test(nq) || AGG_WORST.test(nq)) && isNetwork) {
       const asc = AGG_WORST.test(nq);
-      const all = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d }));
+      const divFilter = divisionFilterFromQuery(q);
+      let all = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d }));
+      if (divFilter) all = all.filter(x => x.d.division === divFilter);
       const { metricLabel, fmt, scored } = rankList(all);
+      if (!scored.length) return showAnswer(`No ratings available for that selection.`);
       scored.sort((a, b) => asc ? (a.s - b.s) : (b.s - a.s));
       const n = parseTopN(nq) || 1;
       const picks = scored.slice(0, n).map(p => ({ ...p, sTxt: fmt(p.s) }));
+      const scopeLbl = divFilter ? `${DIV_LABEL[divFilter]} outlet` : 'outlet';
       lastList = { kind: asc ? 'worst' : 'best', cityTitle: 'the network', metricLabel, picks }; lastWasList = true;
       if (picks.length === 1) {
         openDealer(picks[0].i); setOutletCtx(picks[0]); lastWasList = false;
-        return showAnswer(`${asc ? 'Weakest' : 'Top'} outlet network-wide: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]} in ${picks[0].d.city}, ${metricLabel} ${picks[0].sTxt}.`);
+        return showAnswer(`${asc ? 'Weakest' : 'Top'} ${scopeLbl} network-wide: ${picks[0].d.short_name} ${DIV_LABEL[picks[0].d.division]} in ${picks[0].d.city}, ${metricLabel} ${picks[0].sTxt}.`);
       }
       zoomToDealers(picks);
-      return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} network-wide by ${metricLabel}: ${picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} (${p.d.city}, ${p.sTxt})`).join('; ')}.`);
+      return showAnswer(`${asc ? 'Weakest' : 'Top'} ${picks.length} ${divFilter ? DIV_LABEL[divFilter] + ' ' : ''}network-wide by ${metricLabel}: ${picks.map((p, idx) => `${idx + 1}. ${p.d.short_name} (${p.d.city}, ${p.sTxt})`).join('; ')}.`);
     }
 
     // A4.c: aspect (ABSA) intent — fires when an aspect word or complaint
