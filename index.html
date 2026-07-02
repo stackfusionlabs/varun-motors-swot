@@ -2600,6 +2600,15 @@ render();
   }
   let isSpeaking = false;
   let autoResumeAfterSpeak = false;
+  let ttsKeepAlive = null;
+  function startTtsKeepAlive() {
+    // Chrome silently stops utterances longer than ~15s; pause/resume keeps them alive.
+    clearInterval(ttsKeepAlive);
+    ttsKeepAlive = setInterval(() => {
+      if (speechSynthesis.speaking) { try { speechSynthesis.pause(); speechSynthesis.resume(); } catch (e) {} }
+      else clearInterval(ttsKeepAlive);
+    }, 9000);
+  }
   function speak(text, { resumeAfter = false } = {}) {
     autoResumeAfterSpeak = resumeAfter;
     if (!('speechSynthesis' in window)) return;
@@ -2607,9 +2616,9 @@ render();
     const u = new SpeechSynthesisUtterance(text);
     if (ttsVoice) u.voice = ttsVoice;
     u.rate = 1.02; u.pitch = 1.05;
-    u.onstart = () => { isSpeaking = true;  };
-    u.onend   = () => { isSpeaking = false; if (autoResumeAfterSpeak) startListening(); };
-    u.onerror = () => { isSpeaking = false; };
+    u.onstart = () => { isSpeaking = true; startTtsKeepAlive(); };
+    u.onend   = () => { isSpeaking = false; clearInterval(ttsKeepAlive); if (autoResumeAfterSpeak) startListening(); };
+    u.onerror = () => { isSpeaking = false; clearInterval(ttsKeepAlive); };
     speechSynthesis.speak(u);
   }
 
@@ -2761,9 +2770,9 @@ render();
 
       const chunks = [];
       const SILENCE_THRESH = 0.008;
-      const SILENCE_MS = 1500;
-      const MAX_MS = 12000;
-      const WARMUP_MS = 400;
+      const SILENCE_MS = 2200;   // hold longer so mid-sentence pauses ("what is the…") don't cut
+      const MAX_MS = 15000;
+      const WARMUP_MS = 600;
       const start = performance.now();
       let lastLoudMs = start;
       let stopped = false;
@@ -2881,9 +2890,15 @@ render();
   const DRISHTI_STOP_WORDS = new Set([
     'the','please','can','you','tell','about','locate','take','jump','pull','navigate',
     'show','open','find','where','here','this','that','one','some','any',
-    'city','town','place','area','outlet','branch','location','showroom','dealer','store','center','centre','main'
+    'city','town','place','area','outlet','branch','location','showroom','dealer','store','center','centre','main',
+    'drishti','drishthi','bhai','bro','sir','madam','yaar','anna','boss','buddy','dude'
   ]);
   function norm(s) { return (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  // Strip every word that can't be part of an outlet/city name (question words,
+  // aspects, emotions, divisions, filler) so the leftover is the real place name.
+  // Prevents bare words like "service quality" matching a Service outlet.
+  const NON_NAME_RX = /\b(how|hows|haw|what|whats|who|why|when|is|are|was|were|do|does|did|the|of|in|at|for|to|me|my|we|our|us|tell|show|give|open|take|go|walk|through|run|about|around|a|an|and|or|with|vs|versus|compare|comparison|between|than|good|goods|bad|best|better|worst|worse|top|bottom|highest|lowest|rated|rating|ratings|review|reviews|feedback|things|thing|stuff|focus|areas|area|strength|strengths|positive|positives|positivity|negative|negatives|pros|cons|weakness|weaknesses|downside|downsides|complaint|complaints|issue|issues|problem|problems|happening|impactful|insight|insights|concern|concerns|worried|worry|service|servicing|quality|repair|staff|sales|team|delivery|pricing|price|prices|cost|ambiance|ambience|atmosphere|environment|wait|waiting|time|communication|cleanliness|clean|arena|nexa|commercial|truevalue|true|value|used|showroom|outlet|outlets|dealer|dealers|centre|center|store|branch|city|cities|town|region|regions|state|network|overall|entire|whole|total|drishti|drishthi|bhai|bro|sir|madam|please|situated|located|located|which|there|here|it|its|that|this|them|these|those|otherwise|instead|much|many|any|some|all|three|two|one|four|five)\b/g;
+  function nameScrub(q) { return norm(q).replace(NON_NAME_RX, ' ').replace(/\s+/g, ' ').trim(); }
   function toContentTokens(s) {
     // Min length 4: drops noise like "red" (from "in red") that used to
     // substring-match Kama**red**dy's district.
@@ -3203,7 +3218,7 @@ render();
   // "Hard" complaint words unambiguously mean feedback (not a best/worst ranking).
   // Bare "worst"/"weak" are excluded here so "three worst places" ranks outlets
   // instead of dumping complaints.
-  const COMPLAINT_HARD_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|grievance|bad\s+things?)\b/;
+  const COMPLAINT_HARD_RX = /\b(complaint|complaints|issue|issues|problem|problems|negative|negatives|grievance|grievances|bad\s+things?|what.?s?\s+wrong)\b/;
   const HELP_RX = /\b(help|what\s+can\s+you\s+do|what\s+do\s+you\s+do|commands|features|about\s+(drishti|the\s+mvp|this\s+mvp|this\s+demo|this\s+tool)|who\s+are\s+you|how\s+do\s+i\s+use)\b/;
   // Allow a trailing name/filler ("hi Drishti", "hello there") after the greeting.
   const GREET_RX = /^(hi+|hey+|hay|hello+|helo|hii+|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
@@ -3495,10 +3510,11 @@ render();
   }
 
 
-  const WALK_RX    = /\b(walk\s+me\s+through|walkthrough|tell\s+me\s+about|give\s+me\s+a\s+tour|run\s+me\s+through)\b/;
+  const WALK_RX    = /\b(walk\s+me|walkthrough|walk\s+through|tell\s+me\s+about|give\s+me\s+a\s+tour|run\s+me\s+through|take\s+me\s+through|go\s+through)\b/;
   const NAV_RX     = /\b(take\s+me\s+to|go\s+to|navigate\s+to|jump\s+to|drive\s+to|open\s+up)\b|^open\s+/;
-  const CHITCHAT_RX = /\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+do\s+you\s+do|what'?s\s+up|are\s+you\s+there|you\s+there)\b/;
-  const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
+  const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|how\s+are\s+things|how\s+is\s+it\s+going|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
+  const CHITCHAT_RX = /\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+(are\s+|ya\s+|you\s+)?doing|how\s+do\s+you\s+do|what'?s\s+up|are\s+you\s+there|you\s+there)\b/;
+  const RATING_RX = /^(ratings?|reviews?|scores?|pulse|how\s+is\s+it\s+rated|rating)\b[\s!.?]*$/;
   const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
   const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
 
@@ -3570,18 +3586,36 @@ render();
     }
     return found;
   }
+  // Greedily pull multiple outlet names from a space-separated string with no
+  // connectors ("Gajuwaka MVP Colony Pendurthi" → 3 outlets).
+  function gatherOutletsSpan(q) {
+    const toks = nameScrub(q).split(' ').filter(Boolean);
+    const found = [];
+    let i = 0;
+    while (i < toks.length) {
+      let matched = null, adv = 1;
+      for (let len = Math.min(3, toks.length - i); len >= 1; len--) {
+        const m = findOutlet(toks.slice(i, i + len).join(' '));
+        if (m) { matched = m; adv = len; break; }
+      }
+      if (matched && !found.some(f => f.i === matched.i)) { found.push(matched); i += adv; }
+      else i++;
+    }
+    return found;
+  }
   // Sequential spoken walkthrough — opens each outlet as its narration begins.
   function speakWalkthrough(parts) {
     answerEl.textContent = parts.map(p => p.text).join(' ');
     if (!('speechSynthesis' in window)) { parts.forEach(p => p.onStart && p.onStart()); return; }
     try { speechSynthesis.cancel(); } catch (e) {}
     autoResumeAfterSpeak = false;
+    startTtsKeepAlive();
     parts.forEach((p, i) => {
       const u = new SpeechSynthesisUtterance(p.text);
       if (ttsVoice) u.voice = ttsVoice;
       u.rate = 1.02; u.pitch = 1.05;
       u.onstart = () => { isSpeaking = true; if (p.onStart) p.onStart(); };
-      if (i === parts.length - 1) u.onend = () => { isSpeaking = false; };
+      if (i === parts.length - 1) u.onend = () => { isSpeaking = false; clearInterval(ttsKeepAlive); };
       speechSynthesis.speak(u);
     });
   }
@@ -3618,7 +3652,7 @@ render();
     lastList = { kind, cityTitle: scopeTitle, metricLabel, picks }; lastWasList = true;
     speakWalkthrough(parts);
   }
-  // "walk me through all Arena in Vizag" — open each, then top & bottom 3.
+  // "walk me through all Arena in Vizag" — open each (cap 8 narrated), top & bottom 3.
   function walkthroughAllInCity(list, cityTitle, divFilter) {
     const { metricLabel, fmt, scored } = rankList(list);
     scored.sort((a, b) => b.s - a.s);
@@ -3626,7 +3660,8 @@ render();
     openDealer(withTxt.length ? withTxt[0].i : list[0].i);
     const label = divFilter ? DIV_LABEL[divFilter] + ' outlets' : 'outlets';
     const parts = [{ text: `Walking through ${list.length} ${label} in ${cityTitle}.`, onStart: () => zoomToDealers(list) }];
-    withTxt.forEach(p => parts.push({
+    const narrate = withTxt.slice(0, 8);   // cap so long lists don't overrun TTS
+    narrate.forEach(p => parts.push({
       text: `${p.d.short_name}, ${metricLabel} ${p.sTxt}.`,
       onStart: () => openDealer(p.i)
     }));
@@ -3672,21 +3707,27 @@ render();
     }
     // Locate: "where is X" / "which city is X" (before city aggregation).
     if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
-    // "walk me through all Arena in Vizag" → open each in the city (optionally a
-    // division), then read top & bottom 3.
+    // "walk me through all Arena in Vizag" / "walk me through Visakhapatnam" →
+    // open each outlet in the city (optionally a division), then read top & bottom 3.
     if (WALK_RX.test(nq)) {
       const wcity = findCityInQuery(q);
-      if (wcity && (divisionFilterFromQuery(q) || /\ball\b/.test(nq))) {
-        const wdiv = divisionFilterFromQuery(q);
-        let list = dealersInCity(wcity);
-        if (wdiv) list = list.filter(x => x.d.division === wdiv);
-        if (list.length) { setCityCtx(wcity); walkthroughAllInCity(list, list[0].d.city, wdiv); return; }
+      if (wcity) {
+        // Is a specific outlet named beyond the city itself?
+        const nsTokens = nameScrub(q).split(' ').filter(t => t && !findCityInQuery(t));
+        const specific = nsTokens.length ? (findOutlet(nsTokens.join(' ')) || fuzzyFindOutlet(nsTokens.join(' '))) : null;
+        if (!specific) {
+          const wdiv = divisionFilterFromQuery(q);
+          let list = dealersInCity(wcity);
+          if (wdiv) list = list.filter(x => x.d.division === wdiv);
+          if (list.length) { setCityCtx(wcity); walkthroughAllInCity(list, list[0].d.city, wdiv); return; }
+        }
       }
     }
-    // Comparative / single walkthrough: "walk me through X and Y", "X vs Y",
-    // "is X better or Y", "compare it with Y", "tell me about X".
+    // Comparative / multi / single walkthrough: "walk me through X and Y", "X vs Y",
+    // "is X better or Y", "compare it with Y", "Gajuwaka MVP Colony Pendurthi".
     if (WALK_RX.test(nq) || COMPARE_RX.test(nq)) {
-      const outs = gatherOutlets(q, 4);
+      let outs = gatherOutlets(q, 4);
+      if (outs.length < 2) { const span = gatherOutletsSpan(q); if (span.length > outs.length) outs = span; }
       if (outs.length >= 2) { walkthroughDealers(outs); return; }
       if (outs.length === 1 && WALK_RX.test(nq)) {
         openDealer(outs[0].i); setOutletCtx(outs[0]);
@@ -3704,17 +3745,16 @@ render();
           return showAnswer(list.length === 1 ? respondOutletInsight(list[0].d) : respondCityInsight(list[0].d.city, list));
         }
       }
-      const im = findOutlet(q) || (function () {
-        // Scrub insight/filler words so a fuzzy match keys off the real name
-        // ("focus areas of marry palam" → Marripalem, not Palakonda).
-        const scrubbed = norm(q).replace(/\b(what|whats|happening|impactful|focus|areas?|things?|to|the|of|on|about|is|in|for|me|tell|show|needs?|attention|concern|worried|worry|insights?|weakness|weaknesses|weak|downsides?|drawbacks?|cons|deep|dive|do|improve|should|know|its|it)\b/g, ' ').replace(/\s+/g, ' ').trim();
-        return scrubbed ? fuzzyFindOutlet(scrubbed) : null;
-      })() || (PRONOUN_RX.test(nq) ? (lastOutlet || prevOutlet) : null);
+      const ns = nameScrub(q);
+      const im = (ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null) || (PRONOUN_RX.test(nq) ? lastOutlet : null);
       if (im) { openDealer(im.i); setOutletCtx(im); return showAnswer(respondOutletInsight(im.d)); }
+      // Bare "focus areas" / "weaknesses" → use the current focus.
+      if (lastOutlet) { openDealer(lastOutlet.i); return showAnswer(respondOutletInsight(lastOutlet.d)); }
+      if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(respondCityInsight(list[0].d.city, list)); } }
     }
 
     // Network-wide scope: "in the whole network / overall / total / entire group".
-    const isNetwork = /\b(network|overall|entire|everywhere|company|whole\s+group|all\s+outlets|anywhere|in\s+all|total|do\s+we\s+have|we\s+have)\b/.test(nq) && !findCityInQuery(q) && !stateFromQuery(nq);
+    const isNetwork = /\b(network|overall|entire|everywhere|company|whole\s+(group|place|thing|network|company)|the\s+whole|all\s+outlets|all\s+regions|anywhere|in\s+all|total|do\s+we\s+have|we\s+have)\b/.test(nq) && !findCityInQuery(q) && !stateFromQuery(nq);
     // Global count: "how many total outlets do we have".
     if (AGG_COUNT.test(nq) && isNetwork) {
       const divFilter = divisionFilterFromQuery(q);
@@ -3760,15 +3800,15 @@ render();
       else if (!emotion && isFollowup) emotion = ctxEmotion;
       ctxEmotion = emotion;
       if (aspectKey) ctxAspect = aspectKey;
-      const wantNeg = (emotion === 'neg') || (isComplaint && emotion !== 'pos');
+      const wantNeg = (emotion === 'neg') || COMPLAINT_HARD_RX.test(nq) || (isComplaint && emotion !== 'pos');
 
-      const scrubbed = norm(q).split(' ').filter(t => !ASPECT_MAP[t] && !COMPLAINT_RX.test(t)).join(' ');
-      const qCity = findCityInQuery(scrubbed);
+      const qCity = findCityInQuery(q);
       if (qCity) {
         const list = dealersInCity(qCity);
         if (list.length) { setCityCtx(qCity); zoomToDealers(list); return showAnswer(respondAspectForCity(aspectKey, wantNeg, list[0].d.city, list)); }
       }
-      const om = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed);
+      const ns = nameScrub(q);
+      const om = ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null;
       if (om) { openDealer(om.i); setOutletCtx(om); const line = respondAspectForDealer(aspectKey, wantNeg, om.d); if (line) return showAnswer(line); }
       // No location in the query → apply to the current focus (outlet, then city).
       if (lastOutlet) {
@@ -3778,13 +3818,12 @@ render();
         const list = dealersInCity(lastCity);
         if (list.length) { zoomToDealers(list); return showAnswer(respondAspectForCity(aspectKey, wantNeg, list[0].d.city, list)); }
       }
-      if (aspectKey) return showAnswer(`Which outlet or city? Try "how is ${pretty(aspectKey)} at Gajuwaka" or "${pretty(aspectKey)} in Hyderabad".`);
+      return showAnswer(`Which outlet or city? Try "how is ${pretty(aspectKey || 'staff')} at Gajuwaka" or "${pretty(aspectKey || 'service')} in Hyderabad".`);
     }
 
     // Strengths / positives — "what are strengths of X", "good things about X".
     if (POSITIVE_RX.test(nq) && !isComplaint) {
-      const scrubbed = norm(q).replace(/\b(strength|strengths|good|things|thing|about|best|positive|positives|pros|highlight|highlights|whats|what|are|the|of)\b/g, ' ').replace(/\s+/g, ' ').trim();
-      const ck = findCityInQuery(scrubbed);
+      const ck = findCityInQuery(q);
       if (ck) {
         const list = dealersInCity(ck);
         if (list.length) {
@@ -3792,8 +3831,15 @@ render();
           return showAnswer(list.length === 1 ? respondPositiveForDealer(list[0].d) : respondPositiveForCity(list[0].d.city, list));
         }
       }
-      const pm = findOutlet(scrubbed) || fuzzyFindOutlet(scrubbed) || (PRONOUN_RX.test(nq) ? (lastOutlet || prevOutlet) : null);
+      const ns = nameScrub(q);
+      const pm = (ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null) || (PRONOUN_RX.test(nq) ? lastOutlet : null) || lastOutlet;
       if (pm) { openDealer(pm.i); setOutletCtx(pm); return showAnswer(respondPositiveForDealer(pm.d)); }
+      if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(respondPositiveForCity(list[0].d.city, list)); } }
+    }
+    // Bare "ratings" / "reviews" / "pulse" → the current focus.
+    if (RATING_RX.test(nq)) {
+      if (lastOutlet) { openDealer(lastOutlet.i); return showAnswer(describeDealer(lastOutlet.d)); }
+      if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(citySummaryLine(list[0].d.city, list)); } }
     }
     // State-level count — "how many Arena in Andhra Pradesh".
     const stateCode = stateFromQuery(nq);
@@ -3880,6 +3926,11 @@ render();
         return showAnswer(describeDealer(all[0].d));
       }
     }
+
+    // Multiple outlet names in a row with no keyword ("Gajuwaka MVP Colony
+    // Pendurthi") → walk through them.
+    const spanned = gatherOutletsSpan(q);
+    if (spanned.length >= 2) { walkthroughDealers(spanned); return; }
 
     // A1: outlet-name lookup for anything that isn't a city.
     const match = findOutlet(q);
