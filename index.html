@@ -3419,7 +3419,7 @@ render();
   }
 
   function helpText() {
-    return "I'm Drishti — Varun Motors' offline voice assistant. Ask me to find an outlet or city, rank the best or worst (\"three best in Vizag\"), count outlets (\"how many Arena in Andhra Pradesh\"), compare two (\"Gajuwaka vs MVP Colony\"), locate one (\"which city is Srikakulam\"), or dig into feedback (\"strengths of Gajuwaka\", \"top complaints in Marripalem\", \"how is staff in Ringroad\").";
+    return "I'm Drishti — Varun Motors' offline voice assistant. I can rank outlets (\"three best in Vizag\"), count them (\"how many Arena in Andhra Pradesh\"), compare (\"Gajuwaka vs MVP Colony\"), dig into feedback (\"strengths of Gajuwaka\", \"top complaints\", \"how is staff\"), read reviews (\"what are people saying\"), talk about the staff (\"who's the best salesperson\", \"tell me about Harish\"), and cover the market (\"Maruti share in Vijayawada\", \"biggest market\", \"where is share highest\", \"which cities are we in\").";
   }
 
   // ----- Extended intents: compare, locate, top-N, strengths, state, memory -----
@@ -3515,7 +3515,7 @@ render();
   // People / entity intelligence — the data already tags named staff (entity_type
   // "staff") per review with sentiment. We aggregate the real names (dropping
   // generic role/brand words) so "who are the people mentioned" works.
-  const GENERIC_ENTITY_RX = /\b(staff|team|teams|sales|salesperson|department|departments|executive|executives|showroom|branch|delivery|loan|instructor|receiving|entire|company|companies|model|models|other|others|varun|motors|gajuwaka|gazuwaka|gwk|service|general|customer|customers|dealer|dealership|manager|management|vehicle|vehicles|car|cars|booking|process|experience|guys)\b/i;
+  const GENERIC_ENTITY_RX = /\b(staff|team|teams|sales|salesperson|department|departments|executive|executives|showroom|branch|delivery|loan|instructor|receiving|entire|company|companies|model|models|other|others|varun|motors|gajuwaka|gazuwaka|gwk|service|general|customer|customers|dealer|dealership|manager|management|vehicle|vehicles|car|cars|booking|process|experience|guys|persons?|asm|dsm|tsm|cre|advisors?|reps?|persons)\b/i;
   function peopleOf(d) {
     const map = {};
     (d.absa_reviews || []).forEach(r => (r.items || []).forEach(it => {
@@ -3523,7 +3523,7 @@ render();
       if (it.category !== 'staff' && it.entity_type !== 'staff') return;
       const e = (it.entity || '').trim();
       if (!e || e.length < 3 || e.split(/\s+/).length > 2 || GENERIC_ENTITY_RX.test(e)) return;
-      if (!/[a-z]/i.test(e)) return;                 // must contain letters
+      if (!/[a-z]/.test(e)) return;                  // must have a lowercase letter (drops ASM, CRE, DSM…)
       const key = e.replace(/\b\w/g, c => c.toUpperCase());
       map[key] = map[key] || { pos: 0, neg: 0 };
       map[key][it.sentiment === 'negative' ? 'neg' : 'pos']++;
@@ -3925,6 +3925,111 @@ render();
     rankingWalkthrough(picks, metricLabel, ctxAgg, scopeTitle);
   }
 
+  // ================= RTO / registration (market) =================
+  const RTOS = DASHBOARD_DATA.rtos || [];
+  const YEARS_ALL = (DASHBOARD_DATA.meta && DASHBOARD_DATA.meta.years_present) || [];
+  const RTO_CITY_INDEX = (function () {
+    const m = {};
+    RTOS.forEach((r, i) => { const c = norm(r.city); (m[c] = m[c] || []).push({ r, i }); });
+    return m;
+  })();
+  const RTO_CITY_SET = new Set(Object.keys(RTO_CITY_INDEX));
+  function sumArr(a) { let s = 0; for (const x of (a || [])) s += x || 0; return s; }
+  function yearsFromQuery(nq) {
+    const m = nq.match(/\b(20[0-2]\d)\b/);
+    if (m && YEARS_ALL.includes(m[1])) return [m[1]];
+    if (/\bthis\s+year\b/.test(nq)) return [YEARS_ALL[YEARS_ALL.length - 1]];
+    if (/\blast\s+year\b/.test(nq)) return [YEARS_ALL[YEARS_ALL.length - 2]];
+    if (/\b(recent|recently|lately|last\s+few\s+years|past\s+few\s+years|these\s+days)\b/.test(nq)) return YEARS_ALL.slice(-3);
+    return YEARS_ALL;
+  }
+  function rtoAgg(list, years) {
+    let cars = 0, maruti = 0;
+    for (const { r } of list) for (const y of years) { const d = r.years && r.years[y]; if (!d) continue; cars += sumArr(d.cars); maruti += sumArr(d.maruti); }
+    return { cars, maruti, share: cars ? maruti / cars : 0 };
+  }
+  function rtosForState(code) { return RTOS.map((r, i) => ({ r, i })).filter(x => x.r.state === code); }
+  function findRtosInQuery(q) {
+    const toks = norm(q).split(' ').filter(Boolean);
+    for (let i = 0; i < toks.length - 1; i++) { const two = toks[i] + ' ' + toks[i + 1]; if (RTO_CITY_INDEX[two]) return { title: RTO_CITY_INDEX[two][0].r.city, list: RTO_CITY_INDEX[two] }; }
+    for (const t of toks) {
+      if (RTO_CITY_INDEX[t]) return { title: RTO_CITY_INDEX[t][0].r.city, list: RTO_CITY_INDEX[t] };
+      const al = CITY_ALIASES[t]; if (al && RTO_CITY_INDEX[al]) return { title: RTO_CITY_INDEX[al][0].r.city, list: RTO_CITY_INDEX[al] };
+      const code = RTOS.find(r => r.code.toLowerCase() === t); if (code) return { title: `${code.city} (${code.code})`, list: [{ r: code, i: RTOS.indexOf(code) }] };
+    }
+    let best = { s: 0, c: null };
+    for (const c of RTO_CITY_SET) for (const t of toks) { if (t.length < 5) continue; const s = jaroWinkler(t, c); if (s > best.s) best = { s, c }; }
+    return best.s >= 0.88 ? { title: RTO_CITY_INDEX[best.c][0].r.city, list: RTO_CITY_INDEX[best.c] } : null;
+  }
+  function pct(x) { return (x * 100).toFixed(1) + '%'; }
+  function spanLabel(years) {
+    if (years.length === 1) return 'in ' + years[0];
+    if (years.length >= YEARS_ALL.length) return 'since ' + YEARS_ALL[0];
+    return 'over ' + years[0] + '–' + years[years.length - 1];
+  }
+  function respondMarket(area, list, years, kind) {
+    const a = rtoAgg(list, years);
+    if (!a.cars) return `No registration data for ${area} ${spanLabel(years)}.`;
+    if (kind === 'share') return `Maruti's market share in ${area} is ${pct(a.share)} — ${a.maruti.toLocaleString()} of ${a.cars.toLocaleString()} vehicles ${spanLabel(years)}.`;
+    return `${area} registered ${a.cars.toLocaleString()} vehicles ${spanLabel(years)}; ${a.maruti.toLocaleString()} were Maruti, a ${pct(a.share)} share.`;
+  }
+  function respondBiggestMarkets(years, asc, n) {
+    const scored = RTOS.map((r, i) => ({ r, cars: rtoAgg([{ r, i }], years).cars })).filter(x => x.cars > 0)
+      .sort((a, b) => asc ? a.cars - b.cars : b.cars - a.cars).slice(0, n);
+    if (!scored.length) return `No registration data available ${spanLabel(years)}.`;
+    return `${asc ? 'Smallest' : 'Biggest'} market${n > 1 ? 's by registrations' : ''} ${spanLabel(years)}: ${scored.map(x => `${x.r.city} (${x.cars.toLocaleString()})`).join('; ')}.`;
+  }
+  function respondShareRanking(years, asc, n) {
+    const MIN = 300;   // ignore tiny RTOs where a handful of cars skews the %
+    const scored = RTOS.map((r, i) => { const a = rtoAgg([{ r, i }], years); return { r, a }; }).filter(x => x.a.cars >= MIN)
+      .sort((a, b) => asc ? a.a.share - b.a.share : b.a.share - a.a.share).slice(0, n);
+    if (!scored.length) return `Not enough registration volume to rank Maruti share ${spanLabel(years)}.`;
+    return `${asc ? 'Lowest' : 'Highest'} Maruti share ${spanLabel(years)}: ${scored.map(x => `${x.r.city} (${pct(x.a.share)})`).join('; ')}.`;
+  }
+  function respondTrend(area, list, kind) {
+    const recent = YEARS_ALL.slice(-3), prior = YEARS_ALL.slice(-6, -3);
+    const rA = rtoAgg(list, recent), pA = rtoAgg(list, prior);
+    if (kind === 'share') {
+      if (!rA.cars || !pA.cars) return `Not enough data to gauge the ${area} Maruti-share trend.`;
+      const dir = rA.share >= pA.share ? 'up' : 'down';
+      return `Maruti share in ${area} is trending ${dir}: ${pct(pA.share)} in ${prior[0]}–${prior[2]} to ${pct(rA.share)} in ${recent[0]}–${recent[2]}.`;
+    }
+    if (!pA.cars) return `Not enough history to gauge the ${area} registration trend.`;
+    const growth = ((rA.cars - pA.cars) / pA.cars) * 100;
+    const dir = growth >= 0 ? 'up' : 'down';
+    return `Registrations in ${area} are ${dir} ${Math.abs(growth).toFixed(0)}%: ${pA.cars.toLocaleString()} in ${prior[0]}–${prior[2]} versus ${rA.cars.toLocaleString()} in ${recent[0]}–${recent[2]}.`;
+  }
+
+  // ================= Network coverage =================
+  function respondCoverage() {
+    const byCity = {};
+    (DASHBOARD_DATA.dealers || []).forEach(d => { byCity[d.city] = (byCity[d.city] || 0) + 1; });
+    const sorted = Object.entries(byCity).sort((a, b) => b[1] - a[1]);
+    const top = sorted.slice(0, 8).map(([c, n]) => `${c} (${n})`).join(', ');
+    return `Varun Motors covers ${sorted.length} cities across Andhra Pradesh and Telangana. Biggest presence: ${top}${sorted.length > 8 ? ', and more' : ''}.`;
+  }
+
+  // ================= People ranking (best/worst staff) =================
+  function rankPeople(list, asc) {
+    const map = peopleInList(list);
+    const arr = Object.values(map).map(p => ({ ...p, score: p.pos - p.neg, tot: p.pos + p.neg }));
+    if (asc) return arr.filter(p => p.neg > 0).sort((a, b) => (b.neg - a.neg) || (a.score - b.score));
+    return arr.filter(p => p.pos > 0).sort((a, b) => (b.score - a.score) || (b.pos - a.pos));
+  }
+  function respondPeopleRank(asc, scopeList, scopeTitle) {
+    const ranked = rankPeople(scopeList, asc).slice(0, 5);
+    if (!ranked.length) return asc ? `No staff have negative mentions ${scopeTitle}.` : `No standout staff names captured ${scopeTitle}.`;
+    return `${asc ? 'Most-criticised' : 'Best-rated'} staff ${scopeTitle}: ${ranked.map(p => `${p.name} (${p.pos} positive${p.neg ? ', ' + p.neg + ' negative' : ''})`).join('; ')}.`;
+  }
+
+  const MARKET_RX     = /\b(registration|registrations|registered|market\s+share|maruti\s+share|\bmarket\b|\brto\b|penetration|cars?\s+sold|vehicles?\s+registered|how\s+many\s+cars|sales\s+volume)\b/;
+  const SHARE_RX      = /\b(share|penetration)\b/;
+  const BIGGEST_RX    = /\b(biggest|largest|top)\b/;
+  const SMALLEST_RX   = /\b(smallest|lowest|weakest)\b/;
+  const TREND_RX      = /\b(growing|growth|trend|trending|declining|rising|falling|increasing|decreasing|momentum|over\s+time)\b/;
+  const COVERAGE_RX   = /\b(which\s+cities|what\s+cities|which\s+regions|which\s+areas|where\s+are\s+we|our\s+(cities|regions|areas|presence|footprint)|coverage|footprint|cities\s+we|how\s+many\s+cities|list.*(cities|regions)|all\s+(our\s+)?cities)\b/;
+  const PERSON_WORD_RX = /\b(guy|guys|person|people|staff|salesperson|sales\s*person|employee|employees|executive|executives|\brep\b|reps|representative|advisor|advisors|staffer|worker)\b/;
+
   // ----- The router -----
   function handleUtterance(text) {
     const q = (text || '').trim();
@@ -3941,6 +4046,35 @@ render();
     if (CHITCHAT_RX.test(nq)) return showAnswer("I'm doing great and ready to dig into Varun Motors' network. Ask me about any outlet, city, best or worst, or how customers feel.");
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
+
+    // Network coverage: "which cities / regions are we in".
+    if (COVERAGE_RX.test(nq)) return showAnswer(respondCoverage());
+
+    // RTO / market: registrations, Maruti share, biggest markets, share ranking, trend.
+    if (MARKET_RX.test(nq)) {
+      const years = yearsFromQuery(nq);
+      const wantShare = SHARE_RX.test(nq);
+      // Ranking across RTOs (no specific area needed).
+      if (TREND_RX.test(nq)) {
+        const area = findRtosInQuery(q);
+        if (area) return showAnswer(respondTrend(area.title, area.list, wantShare ? 'share' : 'volume'));
+        // network trend
+        return showAnswer(respondTrend('the network', RTOS.map((r, i) => ({ r, i })), wantShare ? 'share' : 'volume'));
+      }
+      if (wantShare && (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq) || /\bhighest\b/.test(nq))) {
+        return showAnswer(respondShareRanking(years, SMALLEST_RX.test(nq), parseTopN(nq) || 3));
+      }
+      if (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq)) {
+        // biggest/smallest market by volume (unless clearly about an outlet ranking)
+        return showAnswer(respondBiggestMarkets(years, SMALLEST_RX.test(nq), parseTopN(nq) || 3));
+      }
+      // Specific area (RTO city / code) or state, else whole network.
+      const stateCode = stateFromQuery(nq);
+      const area = findRtosInQuery(q);
+      if (area) return showAnswer(respondMarket(area.title, area.list, years, wantShare ? 'share' : 'volume'));
+      if (stateCode) return showAnswer(respondMarket(STATE_LABEL[stateCode], rtosForState(stateCode), years, wantShare ? 'share' : 'volume'));
+      return showAnswer(respondMarket('the whole network', RTOS.map((r, i) => ({ r, i })), years, wantShare ? 'share' : 'volume'));
+    }
 
     // Navigate-only: "take me to / go to / open X" → open it and invite a question,
     // no unsolicited explanation.
@@ -4064,6 +4198,27 @@ render();
       }
       rankingWalkthrough(picks, metricLabel, asc ? 'worst' : 'best', divFilter ? DIV_LABEL[divFilter] + ' network-wide' : 'the network');
       return;
+    }
+
+    // People ranking: "who is the best/worst service guy / salesperson / staff".
+    // Scope: named city → named outlet → current focus → network. Runs before the
+    // aspect block so "best staff" ranks people, not the staff aspect.
+    {
+      const hasPersonWord = PERSON_WORD_RX.test(nq);
+      const hasOutletWord = /\b(outlet|outlets|showroom|dealer|branch|store)\b/.test(nq);
+      if ((AGG_BEST.test(nq) || AGG_WORST.test(nq)) && (hasPersonWord || (/\bwho\b/.test(nq) && !hasOutletWord))) {
+        const asc = AGG_WORST.test(nq);
+        let scopeList, scopeTitle;
+        const qCity = findCityInQuery(q);
+        const ns = nameScrub(q);
+        const qOutlet = ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null;
+        if (qCity) { scopeList = dealersInCity(qCity); scopeTitle = 'in ' + scopeList[0].d.city; setCityCtx(qCity); }
+        else if (qOutlet) { scopeList = [qOutlet]; scopeTitle = 'at ' + qOutlet.d.short_name; openDealer(qOutlet.i); setOutletCtx(qOutlet); }
+        else if (lastOutlet) { scopeList = [lastOutlet]; scopeTitle = 'at ' + lastOutlet.d.short_name; }
+        else if (lastCity) { scopeList = dealersInCity(lastCity); scopeTitle = 'in ' + scopeList[0].d.city; }
+        else { scopeList = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d })); scopeTitle = 'network-wide'; }
+        return showAnswer(respondPeopleRank(asc, scopeList, scopeTitle));
+      }
     }
 
     // A4.c: aspect (ABSA) intent with sticky aspect + emotion context.
