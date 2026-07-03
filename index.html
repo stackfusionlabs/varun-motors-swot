@@ -2826,6 +2826,77 @@ render();
     return { transcribe, recordUntilSilence, stop, isReady };
   })();
 
+  // ---- Semantic intent fallback (MiniLM embeddings, offline ~22MB) ----
+  // Fires ONLY when the deterministic router can't classify a query. Embeds the
+  // query, finds the nearest intent by cosine similarity, injects that intent's
+  // keyword, and re-runs the router (which still does the entity extraction).
+  const embedder = (function () {
+    let T = null, extractor = null, ready = false, loading = null;
+    let exampleVecs = null;   // [{key, inject, vec}]
+
+    // Canonical example phrasings per intent. Kept short; MiniLM generalises.
+    const INTENTS = [
+      { key: 'best', inject: 'best', examples: ['which is the best', 'top performer', 'who is winning', 'strongest outlet', 'highest rated', 'which impresses customers most', 'star performer'] },
+      { key: 'worst', inject: 'worst', examples: ['which is the worst', 'weakest outlet', 'lowest rated', 'poorest performer', 'which is struggling', 'which is underperforming'] },
+      { key: 'count', inject: 'how many', examples: ['how many outlets', 'number of dealers', 'count of showrooms', 'how many do we have', 'total outlets'] },
+      { key: 'complaints', inject: 'complaints', examples: ['what are the problems', 'any issues', 'what do people complain about', 'negative feedback', 'what is going wrong', 'pain points'] },
+      { key: 'strengths', inject: 'strengths', examples: ['what is good about it', 'positives', 'what are they good at', 'what do customers love', 'strong points', 'highlights'] },
+      { key: 'insight', inject: 'focus areas', examples: ['what needs improvement', 'what should we fix', 'areas to work on', 'what is the situation', 'give me an overview', 'how is it doing'] },
+      { key: 'people', inject: 'who are the people mentioned', examples: ['which staff are named', 'who is mentioned', 'name the salespeople', 'who should i talk to', 'which employees are praised', 'who works there'] },
+      { key: 'compare', inject: 'compare', examples: ['which is better between them', 'difference between them', 'compare these two', 'stack them up'] },
+      { key: 'locate', inject: 'where is', examples: ['where is this', 'which city is it in', 'location of it', 'find the city'] },
+      { key: 'staff', inject: 'staff', examples: ['how is the staff', 'how are the employees', 'sales team behaviour', 'how is the salesperson'] },
+      { key: 'service quality', inject: 'service quality', examples: ['how is the service', 'servicing quality', 'repair experience', 'workshop quality', 'after sales service'] },
+      { key: 'pricing', inject: 'pricing', examples: ['how are the prices', 'is it expensive', 'pricing feedback', 'value for money'] },
+      { key: 'delivery', inject: 'delivery', examples: ['how is delivery', 'delivery experience', 'waiting time for delivery'] },
+    ];
+
+    async function loadRuntime() {
+      if (T) return T;
+      const attempts = ['./js/vendor/transformers.min.js', 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2'];
+      let err = null;
+      for (const url of attempts) { try { T = await import(url); break; } catch (e) { err = e; } }
+      if (!T) throw new Error('transformers.js unavailable: ' + (err && err.message));
+      const env = T.env;
+      env.localModelPath = './models/';
+      env.allowLocalModels = true;
+      env.allowRemoteModels = true;
+      if (env.backends && env.backends.onnx && env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = './js/vendor/';
+      return T;
+    }
+    async function ensure() {
+      if (ready) return;
+      if (loading) return loading;
+      loading = (async () => {
+        const mod = await loadRuntime();
+        extractor = await mod.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+        // Precompute example vectors (flattened list).
+        const flat = [];
+        for (const it of INTENTS) for (const ex of it.examples) flat.push({ key: it.key, inject: it.inject, text: ex });
+        const vecs = await Promise.all(flat.map(f => embed(f.text)));
+        exampleVecs = flat.map((f, i) => ({ key: f.key, inject: f.inject, vec: vecs[i] }));
+        ready = true;
+      })();
+      return loading;
+    }
+    async function embed(text) {
+      const out = await extractor(text, { pooling: 'mean', normalize: true });
+      return Array.from(out.data);
+    }
+    function cos(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+    // Returns {key, inject, score} of the nearest intent, or null.
+    async function classify(query) {
+      await ensure();
+      if (!exampleVecs) return null;
+      const qv = await embed(query);
+      let best = { score: -1, key: null, inject: null };
+      for (const e of exampleVecs) { const s = cos(qv, e.vec); if (s > best.score) best = { score: s, key: e.key, inject: e.inject }; }
+      return best;
+    }
+    return { classify, warmup: ensure, isReady: () => ready };
+  })();
+  const SEMANTIC_MIN = 0.45;   // cosine threshold to accept an intent guess
+
   async function startListeningWhisper() {
     openOverlay();
     answerEl.textContent = '';
@@ -2860,7 +2931,7 @@ render();
   }
 
   // ----- Overlay open/close -----
-  function openOverlay()  { overlay.classList.add('open'); }
+  function openOverlay()  { overlay.classList.add('open'); try { embedder.warmup(); } catch (e) {} }
   function closeOverlay() { overlay.classList.remove('open'); stopListening(); }
   fab.addEventListener('click', () => {
     if (overlay.classList.contains('open') && !listening) { closeOverlay(); return; }
@@ -3209,7 +3280,7 @@ render();
     pricing: 'pricing', price: 'pricing', prices: 'pricing', cost: 'pricing',
     expensive: 'pricing', cheap: 'pricing',
     ambiance: 'ambiance', ambience: 'ambiance', atmosphere: 'ambiance',
-    showroom: 'ambiance', environment: 'ambiance',
+    environment: 'ambiance',
     followup: 'followup', 'follow': 'followup',
     communication: 'communication', response: 'communication', responsive: 'communication',
     clean: 'cleanliness', cleanliness: 'cleanliness', hygiene: 'cleanliness',
@@ -3738,7 +3809,7 @@ render();
     return handleUtteranceRules(q, nq);
   }
 
-  function handleUtteranceRules(q, nq) {
+  function handleUtteranceRules(q, nq, reroute) {
     // A4.a: greeting (bye is handled by the caller).
     if (GREET_RX.test(q)) return showAnswer("Hello! I'm Drishti. Ask about an outlet, city, or say 'help' to see what I can do.");
     // Small talk.
@@ -4041,8 +4112,8 @@ render();
       showAnswer(`Did you mean ${near[0].d.short_name}? ${describeDealer(near[0].d)}`);
       return;
     }
-    // Nothing crossed the match bar — but if a few names are close, name them
-    // so Drishti shows it knows the outlet vocabulary instead of a blank miss.
+    // Nothing crossed the match bar. Before giving up, try the semantic intent
+    // fallback (embeddings) — unless this call is already a re-route from it.
     const hints = [...new Set(near.filter(x => x.s >= FUZZY_HINT_MIN).map(x => x.d.short_name))].slice(0, 3);
     const suffix = hints.length ? ` Closest names I know: ${hints.join(', ')}.` : '';
     const misses = [
@@ -4050,7 +4121,22 @@ render();
       `Not sure about "${q}". You can ask "best in Hyderabad" or "how many in Vijayawada".`,
       `"${q}" didn't ring a bell. Try a Varun Motors outlet, city, or "top in <city>".`
     ];
-    showAnswer(misses[q.length % misses.length] + suffix);
+    const showMiss = () => showAnswer(misses[q.length % misses.length] + suffix);
+    if (reroute) { showMiss(); return; }
+    semanticFallback(q, showMiss);
+  }
+
+  // Embed the query, pick the nearest intent, inject its keyword, and re-run the
+  // router once (reroute=true so a second miss just shows the message).
+  async function semanticFallback(q, onFail) {
+    try {
+      const guess = await embedder.classify(norm(q));
+      if (guess && guess.score >= SEMANTIC_MIN) {
+        const rerun = `${guess.inject} ${q}`;
+        return handleUtteranceRules(rerun, norm(rerun), true);
+      }
+    } catch (e) { console.warn('[embed]', e); }
+    onFail();
   }
 })();
 </script>
