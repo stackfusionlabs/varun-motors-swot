@@ -3601,6 +3601,51 @@ render();
     const snip = personSnippet(person);
     return `${person.name} is a staff member mentioned at ${where}: ${tot.pos} positive${tot.neg ? ', ' + tot.neg + ' negative' : ''} mention${tot.pos + tot.neg === 1 ? '' : 's'}.${snip ? ' A reviewer said: "' + (snip.length > 160 ? snip.slice(0, 157) + '…' : snip) + '"' : ''}`;
   }
+  function personSnippetIn(d, name) {
+    for (const r of (d.absa_reviews || [])) if ((r.items || []).some(it => norm(it.entity || '') === norm(name)) && r.text) return r.text.trim();
+    return null;
+  }
+  // Aggregate named people within a specific set of outlets (the location scope).
+  function peopleInList(list) {
+    const map = {};
+    for (const { i, d } of list) for (const [n, c] of Object.entries(peopleOf(d))) {
+      const k = norm(n);
+      map[k] = map[k] || { name: n, pos: 0, neg: 0, i, d };
+      map[k].pos += c.pos; map[k].neg += c.neg;
+    }
+    return map;
+  }
+  function matchPersonInScope(nameTokens, list) {
+    const map = peopleInList(list);
+    for (const t of nameTokens) if (map[t]) return map[t];
+    let best = { s: 0, p: null };
+    for (const k in map) for (const t of nameTokens) { const s = jaroWinkler(t, k); if (s > best.s) best = { s, p: map[k] }; }
+    return best.s >= 0.9 ? best.p : null;
+  }
+  function respondPersonScoped(p, scopeTitle) {
+    const snip = personSnippetIn(p.d, p.name);
+    return `${p.name} at ${scopeTitle}: ${p.pos} positive${p.neg ? ', ' + p.neg + ' negative' : ''} mention${p.pos + p.neg === 1 ? '' : 's'}.${snip ? ' A reviewer said: "' + (snip.length > 160 ? snip.slice(0, 157) + '…' : snip) + '"' : ''}`;
+  }
+  // Scope-aware: within the current location focus if any, else network-wide.
+  function handlePerson(q) {
+    const nameTokens = nameScrub(q).split(' ').filter(t => t.length >= 3);
+    if (!nameTokens.length) return null;
+    const scopeList = lastOutlet ? [lastOutlet] : (lastCity ? dealersInCity(lastCity) : null);
+    if (scopeList && scopeList.length) {
+      const scopeTitle = lastOutlet
+        ? `${lastOutlet.d.short_name}, ${DIV_LABEL[lastOutlet.d.division]} in ${lastOutlet.d.city}`
+        : scopeList[0].d.city;
+      const inScope = matchPersonInScope(nameTokens, scopeList);
+      if (inScope) { openDealer(inScope.i); setOutletCtx({ i: inScope.i, d: inScope.d }); return respondPersonScoped(inScope, scopeTitle); }
+      const global = findPerson(q);
+      const nm = global ? global.name : cap(nameTokens[nameTokens.length - 1]);
+      let msg = `I don't see anyone called ${nm} mentioned at ${scopeTitle}.`;
+      if (global) { const outs = [...new Set(global.entries.map(e => e.d.short_name))].slice(0, 2); msg += ` ${nm} is mentioned at ${outs.join(', ')}.`; }
+      return msg;
+    }
+    const p = findPerson(q);
+    return p ? respondPerson(p) : null;
+  }
 
   // ----- Read out review comments: "walk me through the comments", "read reviews" -----
   const COMMENTS_RX = /\b(comments?|read\s+.*(reviews?|comments?)|walk.*(reviews?|comments?)|what.*(saying|said)|actual\s+(reviews?|comments?)|testimonials?|what\s+do\s+people\s+say|hear\s+.*(reviews?|comments?)|show\s+.*(reviews?|comments?))\b/;
@@ -3934,12 +3979,15 @@ render();
       if (pm) { openDealer(pm.i); setOutletCtx(pm); return showAnswer(respondPeopleForDealer(pm.d)); }
       if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(respondPeopleForCity(list[0].d.city, list)); } }
     }
-    // Person-first: "tell me about Harish" / "who is Madhav" → person, provided
-    // the name isn't a city and exactly matches a known staff name (so it beats a
-    // partial outlet match like Madhav ⊂ Madhavanagar).
+    // Person-first: "tell me about Harish" / "who is Madhav". Scope-aware — if a
+    // location is in focus, answer only if that person is there ("no one called X
+    // at <focus>" otherwise). Fires only when the name is a known person (exact
+    // global OR in the current scope), so "tell me about Gajuwaka" stays an outlet.
     if (PERSON_QUERY_RX.test(nq) && !findCityInQuery(q)) {
-      const p = findPersonExact(q);
-      if (p) return showAnswer(respondPerson(p));
+      const scopeList = lastOutlet ? [lastOutlet] : (lastCity ? dealersInCity(lastCity) : null);
+      const nameToks = nameScrub(q).split(' ').filter(t => t.length >= 3);
+      const known = findPersonExact(q) || (scopeList && scopeList.length ? matchPersonInScope(nameToks, scopeList) : null);
+      if (known) { const r = handlePerson(q); if (r) return showAnswer(r); }
     }
     // "walk me through all Arena in Vizag" / "walk me through Visakhapatnam" →
     // open each outlet in the city (optionally a division), then read top & bottom 3.
@@ -4203,9 +4251,8 @@ render();
       showAnswer(line);
       return;
     }
-    // Named person? "tell me about Harish", "who is Rajesh".
-    const person = findPerson(q);
-    if (person) return showAnswer(respondPerson(person));
+    // Named person? "tell me about Harish", or a bare name in context — scope-aware.
+    if (findPerson(q)) { const r = handlePerson(q); if (r) return showAnswer(r); }
     // Phonetic fuzzy fallback — catch STT mishears / typos.
     const near = nearestOutlets(q, 3);
     if (near.length && near[0].s >= FUZZY_MATCH_MIN) {
