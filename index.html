@@ -2968,7 +2968,7 @@ render();
   // Strip every word that can't be part of an outlet/city name (question words,
   // aspects, emotions, divisions, filler) so the leftover is the real place name.
   // Prevents bare words like "service quality" matching a Service outlet.
-  const NON_NAME_RX = /\b(how|hows|haw|what|whats|who|why|when|is|are|was|were|do|does|did|the|of|in|at|for|to|me|my|we|our|us|tell|show|give|open|take|go|walk|through|run|about|around|a|an|and|or|with|vs|versus|compare|comparison|between|than|good|goods|bad|best|better|worst|worse|top|bottom|highest|lowest|rated|rating|ratings|review|reviews|feedback|things|thing|stuff|focus|areas|area|strength|strengths|positive|positives|positivity|negative|negatives|pros|cons|weakness|weaknesses|downside|downsides|complaint|complaints|issue|issues|problem|problems|happening|impactful|insight|insights|concern|concerns|worried|worry|service|servicing|quality|repair|staff|sales|team|delivery|pricing|price|prices|cost|ambiance|ambience|atmosphere|environment|wait|waiting|time|communication|cleanliness|clean|arena|nexa|commercial|truevalue|true|value|used|showroom|outlet|outlets|dealer|dealers|centre|center|store|branch|city|cities|town|region|regions|state|network|overall|entire|whole|total|drishti|drishthi|bhai|bro|sir|madam|please|situated|located|located|which|there|here|it|its|that|this|them|these|those|otherwise|instead|much|many|any|some|all|three|two|one|four|five)\b/g;
+  const NON_NAME_RX = /\b(how|hows|haw|what|whats|who|why|when|is|are|was|were|do|does|did|the|of|in|at|for|to|me|my|we|our|us|tell|show|give|open|take|go|walk|through|run|about|around|a|an|and|or|with|vs|versus|compare|comparison|between|than|good|goods|bad|best|better|worst|worse|top|bottom|highest|lowest|rated|rating|ratings|review|reviews|feedback|things|thing|stuff|focus|areas|area|strength|strengths|positive|positives|positivity|negative|negatives|pros|cons|weakness|weaknesses|downside|downsides|complaint|complaints|issue|issues|problem|problems|happening|impactful|insight|insights|concern|concerns|worried|worry|service|servicing|quality|repair|staff|sales|team|delivery|pricing|price|prices|cost|ambiance|ambience|atmosphere|environment|wait|waiting|time|communication|cleanliness|clean|arena|nexa|commercial|truevalue|true|value|used|showroom|outlet|outlets|dealer|dealers|centre|center|store|branch|city|cities|town|region|regions|state|network|overall|entire|whole|total|drishti|drishthi|bhai|bro|sir|madam|please|situated|located|which|there|here|it|its|that|this|them|these|those|otherwise|instead|much|many|any|some|all|three|two|one|four|five|comment|comments|saying|said|say|testimonial|testimonials|can|could|would|will|talk|meet|ask|contact|person|people|read|hear|listen|number)\b/g;
   function nameScrub(q) { return norm(q).replace(NON_NAME_RX, ' ').replace(/\s+/g, ' ').trim(); }
   function toContentTokens(s) {
     // Min length 4: drops noise like "red" (from "in red") that used to
@@ -3550,6 +3550,76 @@ render();
     if (!names.length) return `No individual staff names were captured across ${cityTitle}.`;
     return `People mentioned across ${cityTitle}: ${names.slice(0, 6).map(([n, c]) => fmtPerson(n, c)).join('; ')}.`;
   }
+
+  // ----- Person lookup: "tell me about Harish", "who is Rajesh" -----
+  let PERSON_INDEX = null;
+  function buildPersonIndex() {
+    if (PERSON_INDEX) return PERSON_INDEX;
+    const idx = {};
+    (DASHBOARD_DATA.dealers || []).forEach((d, i) => {
+      for (const [name, c] of Object.entries(peopleOf(d))) {
+        const key = norm(name);
+        idx[key] = idx[key] || { name, entries: [] };
+        idx[key].entries.push({ i, d, pos: c.pos, neg: c.neg });
+      }
+    });
+    PERSON_INDEX = idx;
+    return idx;
+  }
+  function findPerson(q) {
+    const idx = buildPersonIndex();
+    const tokens = nameScrub(q).split(' ').filter(t => t.length >= 3);
+    if (!tokens.length) return null;
+    for (const t of tokens) if (idx[t]) return idx[t];       // exact token
+    let best = { s: 0, p: null };
+    for (const key in idx) for (const t of tokens) { const s = jaroWinkler(t, key); if (s > best.s) best = { s, p: idx[key] }; }
+    return best.s >= 0.86 ? best.p : null;
+  }
+  function personSnippet(person) {
+    for (const e of person.entries) {
+      for (const r of (e.d.absa_reviews || [])) {
+        if ((r.items || []).some(it => norm(it.entity || '') === norm(person.name)) && r.text) return r.text.trim();
+      }
+    }
+    return null;
+  }
+  function respondPerson(person) {
+    const tot = person.entries.reduce((a, e) => ({ pos: a.pos + e.pos, neg: a.neg + e.neg }), { pos: 0, neg: 0 });
+    const where = person.entries.map(e => `${e.d.short_name} (${e.d.city})`).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(', ');
+    const first = person.entries[0];
+    openDealer(first.i); setOutletCtx(first);
+    const snip = personSnippet(person);
+    return `${person.name} is a staff member mentioned at ${where}: ${tot.pos} positive${tot.neg ? ', ' + tot.neg + ' negative' : ''} mention${tot.pos + tot.neg === 1 ? '' : 's'}.${snip ? ' A reviewer said: "' + (snip.length > 160 ? snip.slice(0, 157) + '…' : snip) + '"' : ''}`;
+  }
+
+  // ----- Read out review comments: "walk me through the comments", "read reviews" -----
+  const COMMENTS_RX = /\b(comments?|read\s+.*(reviews?|comments?)|walk.*(reviews?|comments?)|what.*(saying|said)|actual\s+(reviews?|comments?)|testimonials?|what\s+do\s+people\s+say|hear\s+.*(reviews?|comments?)|show\s+.*(reviews?|comments?))\b/;
+  function reviewsFor(d, aspectKey, wantNeg) {
+    let revs = (d.absa_reviews || []).filter(r => r.text && r.text.trim());
+    if (aspectKey) {
+      const kwRx = new RegExp('\\b(' + (ASPECT_KEYWORDS[aspectKey] || [aspectKey]).join('|') + ')', 'i');
+      revs = revs.filter(r => (r.items || []).some(it => it.category === aspectKey) || kwRx.test(r.text));
+    }
+    if (wantNeg === true) revs = revs.filter(r => (r.rating != null && r.rating <= 3) || (r.items || []).some(it => it.sentiment === 'negative'));
+    else if (wantNeg === false) revs = revs.filter(r => (r.rating != null && r.rating >= 4) || (r.items || []).some(it => it.sentiment === 'positive'));
+    return revs;
+  }
+  function handleComments(match, aspectKey, wantNeg) {
+    const d = match.d;
+    const where = `${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    const revs = reviewsFor(d, aspectKey, wantNeg);
+    if (!revs.length) { openDealer(match.i); setOutletCtx(match); return showAnswer(`No matching review comments captured for ${d.short_name}, ${where}.`); }
+    const pick = revs.slice(0, 3);
+    const label = (wantNeg === true ? 'critical ' : wantNeg === false ? 'positive ' : '') + (aspectKey ? pretty(aspectKey) + ' ' : '');
+    const parts = [{ text: `Reading ${pick.length} ${label}review${pick.length > 1 ? 's' : ''} for ${d.short_name}.`, onStart: () => openDealer(match.i) }];
+    pick.forEach(r => {
+      const t = r.text.trim();
+      parts.push({ text: `${r.rating ? r.rating + ' stars. ' : ''}${t.length > 220 ? t.slice(0, 217) + '…' : t}` });
+    });
+    setOutletCtx(match);
+    speakWalkthrough(parts);
+  }
+
   function handleLocate(q) {
     const scrubbed = norm(q).replace(/\b(where|wheres|is|are|which|what|city|cities|located|location|of|in|the|present|find|tell|me|does|do|situated)\b/g, ' ').replace(/\s+/g, ' ').trim();
     // City first, so "which city is Srikakulam" answers the city (not Nexa Srikakulam).
@@ -3625,7 +3695,7 @@ render();
   const INSIGHT_RX = /\b(what'?s\s+happening|whats\s+happening|happening|how\s+are\s+things|how\s+is\s+it\s+going|impactful|focus\s+areas?|things?\s+to\s+focus|to\s+focus\s+on|what\s+to\s+improve|needs?\s+attention|areas?\s+of\s+concern|insights?|deep\s+dive|what\s+should\s+i\s+know|weakness|weaknesses|weak\s+areas?|downsides?|drawbacks?|\bcons\b|worried|worry|concern)\b/;
   const CHITCHAT_RX = /\b(how\s+are\s+you|how'?s\s+it\s+going|how\s+(are\s+|ya\s+|you\s+)?doing|how\s+do\s+you\s+do|what'?s\s+up|are\s+you\s+there|you\s+there)\b/;
   const RATING_RX = /^(ratings?|reviews?|scores?|pulse|how\s+is\s+it\s+rated|rating)\b[\s!.?]*$/;
-  const PEOPLE_RX = /\b(who\s+are\s+the\s+people|people\s+mentioned|who\s+(is|are|was|were)\s+mentioned|which\s+(staff|people|employees?|salesperson)|names?\s+mentioned|any\s+names|who\s+works|staff\s+members?|salespeople|sales\s+people|who\s+should\s+i\s+(ask|talk|meet)|which\s+person)\b/;
+  const PEOPLE_RX = /\b(who\s+are\s+the\s+people|people\s+mentioned|who\s+(is|are|was|were)\s+mentioned|which\s+(staff|people|employees?|salesperson)|names?\s+mentioned|any\s+names|who\s+works|staff\s+members?|salespeople|sales\s+people|(who|whom)\s+(should\s+i\s+|to\s+|do\s+i\s+)?(ask|talk|meet|contact|speak)|point\s+of\s+contact|contact\s+person|which\s+person)\b/;
   const WHY_RX     = /\bwhy\b|\bhow\s+come\b/;
   const PRONOUN_RX = /\b(it|its|that|this|there|same|them|these|those)\b/;
 
@@ -3833,6 +3903,18 @@ render();
     }
     // Locate: "where is X" / "which city is X" (before city aggregation).
     if (LOCATE_RX.test(nq)) { const r = handleLocate(q); if (r) return showAnswer(r); }
+    // Read out review comments: "walk me through the comments", "read the reviews",
+    // "what are people saying (about service)". Uses aspect/emotion context.
+    if (COMMENTS_RX.test(nq)) {
+      const cAspect = detectAspect(q) || ctxAspect;
+      const cWantNeg = /\b(negative|worst|bad|complaint|complaints|critical|problem)\b/.test(nq) ? true : /\b(positive|good|best|praise)\b/.test(nq) ? false : null;
+      const ns = nameScrub(q);
+      const cm = (ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null) || lastOutlet;
+      if (cm) { handleComments(cm, cAspect, cWantNeg); return; }
+      // City → read comments from its top outlet.
+      const ck = findCityInQuery(q) || lastCity;
+      if (ck) { const list = dealersInCity(ck); if (list.length) { handleComments(rankList(list).scored.sort((a,b)=>b.s-a.s)[0] || list[0], cAspect, cWantNeg); return; } }
+    }
     // People / entities: "who are the people mentioned", "which staff", "salespeople".
     if (PEOPLE_RX.test(nq)) {
       const ck = findCityInQuery(q);
@@ -4104,6 +4186,9 @@ render();
       showAnswer(line);
       return;
     }
+    // Named person? "tell me about Harish", "who is Rajesh".
+    const person = findPerson(q);
+    if (person) return showAnswer(respondPerson(person));
     // Phonetic fuzzy fallback — catch STT mishears / typos.
     const near = nearestOutlets(q, 3);
     if (near.length && near[0].s >= FUZZY_MATCH_MIN) {
