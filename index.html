@@ -3515,7 +3515,7 @@ render();
   // People / entity intelligence — the data already tags named staff (entity_type
   // "staff") per review with sentiment. We aggregate the real names (dropping
   // generic role/brand words) so "who are the people mentioned" works.
-  const GENERIC_ENTITY_RX = /\b(staff|team|teams|sales|salesperson|department|departments|executive|executives|showroom|branch|delivery|loan|instructor|receiving|entire|company|companies|model|models|other|others|varun|motors|gajuwaka|gazuwaka|gwk|service|general|customer|customers|dealer|dealership|manager|management)\b/i;
+  const GENERIC_ENTITY_RX = /\b(staff|team|teams|sales|salesperson|department|departments|executive|executives|showroom|branch|delivery|loan|instructor|receiving|entire|company|companies|model|models|other|others|varun|motors|gajuwaka|gazuwaka|gwk|service|general|customer|customers|dealer|dealership|manager|management|vehicle|vehicles|car|cars|booking|process|experience|guys)\b/i;
   function peopleOf(d) {
     const map = {};
     (d.absa_reviews || []).forEach(r => (r.items || []).forEach(it => {
@@ -3575,6 +3575,16 @@ render();
     for (const key in idx) for (const t of tokens) { const s = jaroWinkler(t, key); if (s > best.s) best = { s, p: idx[key] }; }
     return best.s >= 0.86 ? best.p : null;
   }
+  function findPersonExact(q) {
+    const idx = buildPersonIndex();
+    const tokens = nameScrub(q).split(' ').filter(t => t.length >= 3);
+    if (!tokens.length) return null;
+    const joined = tokens.join(' ');
+    if (idx[joined]) return idx[joined];
+    for (const t of tokens) if (idx[t]) return idx[t];
+    return null;
+  }
+  const PERSON_QUERY_RX = /\b(tell me about|who is|who's|whos|info on|details on|know about|about the person)\b/;
   function personSnippet(person) {
     for (const e of person.entries) {
       for (const r of (e.d.absa_reviews || [])) {
@@ -3923,6 +3933,13 @@ render();
       const pm = (ns ? (findOutlet(ns) || fuzzyFindOutlet(ns)) : null) || lastOutlet;
       if (pm) { openDealer(pm.i); setOutletCtx(pm); return showAnswer(respondPeopleForDealer(pm.d)); }
       if (lastCity) { const list = dealersInCity(lastCity); if (list.length) { zoomToDealers(list); return showAnswer(respondPeopleForCity(list[0].d.city, list)); } }
+    }
+    // Person-first: "tell me about Harish" / "who is Madhav" → person, provided
+    // the name isn't a city and exactly matches a known staff name (so it beats a
+    // partial outlet match like Madhav ⊂ Madhavanagar).
+    if (PERSON_QUERY_RX.test(nq) && !findCityInQuery(q)) {
+      const p = findPersonExact(q);
+      if (p) return showAnswer(respondPerson(p));
     }
     // "walk me through all Arena in Vizag" / "walk me through Visakhapatnam" →
     // open each outlet in the city (optionally a division), then read top & bottom 3.
