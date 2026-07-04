@@ -3712,12 +3712,12 @@ render();
   // it. Changing only the aspect keeps the emotion; "otherwise" flips the emotion.
   function setOutletCtx(m) {
     if (m && (!lastOutlet || lastOutlet.i !== m.i)) prevOutlet = lastOutlet;
-    lastOutlet = m; lastWasList = false;
+    lastOutlet = m; lastWasList = false; ctxMode = null;
     if (m && m.d && m.d.city) lastCity = norm(m.d.city);
   }
   function setCityCtx(c) {
     if (c && c !== lastCity) { prevCity = lastCity; prevOutlet = lastOutlet; lastOutlet = null; }
-    lastCity = c;
+    lastCity = c; ctxMode = null;
   }
   function resetToAll() { prevOutlet = lastOutlet; prevCity = lastCity; lastOutlet = null; lastCity = null; }
   // For a follow-up aspect question with no named outlet: prefer the most recent
@@ -3735,7 +3735,10 @@ render();
   // Aspect + emotion slots.
   let ctxAspect = null;          // 'staff' | 'service_quality' | ...
   let ctxEmotion = null;         // 'pos' | 'neg' | null (neutral = show both)
-  let ctxAgg = null;             // 'best' | 'worst' — last ranking direction (for "in service" follow-ups)
+  let ctxAgg = null;             // 'best' | 'worst' | 'count' — last aggregation (for bare-division follow-ups)
+  let ctxMode = null;            // 'market' when an RTO/market question is in focus
+  let ctxMarketKind = null;      // 'share' | 'volume'
+  let ctxYears = null;           // last year selection for market follow-ups
   const OTHERWISE_RX = /\b(otherwise|other\s+way|the\s+other\s+way|instead|conversely|on\s+the\s+other\s+hand|flip\s+it|reverse)\b/;
   const FOLLOWUP_RX  = /^(how|what)\s+about\b|^and\b/;
   function detectEmotion(nq) {
@@ -3815,9 +3818,12 @@ render();
   function gatherOutlets(q, max) {
     const parts = q.split(/\b(?:versus|vs|compared\s+to|compare|comparison|difference\s+between|between|with|and|or|better\s+than|better|worse|walk\s+me\s+through|walkthrough|tell\s+me\s+about|then|also|run\s+me\s+through)\b/i)
       .map(s => s.trim()).filter(s => s.length > 1);
+    const stripDiv = p => p.replace(/\b(arena|nexa|commercial|true\s*value|truevalue|used|service|servicing|showroom|outlet|branch|store|staff|pricing|delivery|ambiance)\b/gi, ' ').replace(/\s+/g, ' ').trim();
     const found = [];
     for (const p of parts) {
-      let m = /^(it|its|that|this|same)$/i.test(p) ? lastOutlet : (findOutlet(p) || fuzzyFindOutlet(p));
+      if (/^(it|its|that|this|same)$/i.test(p.trim())) { if (lastOutlet && !found.some(f => f.i === lastOutlet.i)) found.push(lastOutlet); continue; }
+      const pp = stripDiv(p) || p;
+      const m = findOutlet(pp) || fuzzyFindOutlet(pp);
       if (m && !found.some(f => f.i === m.i)) { found.push(m); if (found.length >= max) break; }
     }
     return found;
@@ -3844,33 +3850,43 @@ render();
     answerEl.textContent = parts.map(p => p.text).join(' ');
     if (!('speechSynthesis' in window)) { parts.forEach(p => p.onStart && p.onStart()); return; }
     try { speechSynthesis.cancel(); } catch (e) {}
-    autoResumeAfterSpeak = false;
+    const resume = true;   // voice UI: re-listen after a walkthrough, like single answers do
     startTtsKeepAlive();
     parts.forEach((p, i) => {
       const u = new SpeechSynthesisUtterance(p.text);
       if (ttsVoice) u.voice = ttsVoice;
       u.rate = 1.02; u.pitch = 1.05;
       u.onstart = () => { isSpeaking = true; if (p.onStart) p.onStart(); };
-      if (i === parts.length - 1) u.onend = () => { isSpeaking = false; clearInterval(ttsKeepAlive); };
+      if (i === parts.length - 1) u.onend = () => { isSpeaking = false; clearInterval(ttsKeepAlive); if (resume) startListening(); };
       speechSynthesis.speak(u);
     });
   }
-  function walkthroughDealers(matches) {
+  function narrateDealerAspect(d, lead, aspectKey) {
+    const cat = (d.absa_categories || {})[aspectKey];
+    const head = `${lead ? lead + ' ' : ''}${d.short_name}, ${DIV_LABEL[d.division] || d.division} in ${d.city}`;
+    if (cat && (cat.pos || cat.neg)) return `${head}: ${pretty(aspectKey)} ${cat.score}/10, ${cat.pos || 0} positive and ${cat.neg || 0} negative.`;
+    const men = mentionsForAspect(d, aspectKey);
+    if (men.length) { const neg = men.filter(m => m.sentiment === 'negative').length; return `${head}: ${men.length - neg} positive, ${neg} negative ${pretty(aspectKey)} mentions.`; }
+    return `${head}: no ${pretty(aspectKey)} feedback captured.`;
+  }
+  function walkthroughDealers(matches, aspectKey) {
     openDealer(matches[0].i);   // immediate visual for the first stop
     const leads = ['First,', 'Next,', 'Then,', 'Also,'];
     const parts = matches.map((m, idx) => ({
-      text: narrateDealer(m.d, leads[Math.min(idx, leads.length - 1)]),
+      text: aspectKey ? narrateDealerAspect(m.d, leads[Math.min(idx, leads.length - 1)], aspectKey) : narrateDealer(m.d, leads[Math.min(idx, leads.length - 1)]),
       onStart: idx === 0 ? null : () => openDealer(m.i)
     }));
-    const scored = matches.map(m => ({ m, r: rankValue(m.d) })).filter(x => x.r).sort((a, b) => b.r.v - a.r.v);
-    // Only compare head-to-head when both use the same metric (pulse vs pulse, etc.).
-    if (scored.length >= 2 && scored[0].r.label === scored[scored.length - 1].r.label) {
-      const hi = scored[0], lo = scored[scored.length - 1];
-      const lbl = hi.r.label === 'pulse' ? 'pulse' : 'Google rating';
-      parts.push({
-        text: `Overall, ${hi.m.d.short_name} leads on ${lbl} at ${hi.r.txt}, versus ${lo.m.d.short_name} at ${lo.r.txt}.`,
-        onStart: () => zoomToDealers(matches)
-      });
+    if (aspectKey) {
+      // Compare head-to-head on the aspect score.
+      const scored = matches.map(m => { const c = (m.d.absa_categories || {})[aspectKey]; return { m, s: c && c.score != null ? c.score : null }; }).filter(x => x.s != null).sort((a, b) => b.s - a.s);
+      if (scored.length >= 2) parts.push({ text: `On ${pretty(aspectKey)}, ${scored[0].m.d.short_name} leads at ${scored[0].s}/10 versus ${scored[scored.length - 1].m.d.short_name} at ${scored[scored.length - 1].s}/10.`, onStart: () => zoomToDealers(matches) });
+    } else {
+      const scored = matches.map(m => ({ m, r: rankValue(m.d) })).filter(x => x.r).sort((a, b) => b.r.v - a.r.v);
+      if (scored.length >= 2 && scored[0].r.label === scored[scored.length - 1].r.label) {
+        const hi = scored[0], lo = scored[scored.length - 1];
+        const lbl = hi.r.label === 'pulse' ? 'pulse' : 'Google rating';
+        parts.push({ text: `Overall, ${hi.m.d.short_name} leads on ${lbl} at ${hi.r.txt}, versus ${lo.m.d.short_name} at ${lo.r.txt}.`, onStart: () => zoomToDealers(matches) });
+      }
     }
     setOutletCtx(matches[matches.length - 1]);
     speakWalkthrough(parts);
@@ -3936,11 +3952,14 @@ render();
   const RTO_CITY_SET = new Set(Object.keys(RTO_CITY_INDEX));
   function sumArr(a) { let s = 0; for (const x of (a || [])) s += x || 0; return s; }
   function yearsFromQuery(nq) {
-    const m = nq.match(/\b(20[0-2]\d)\b/);
-    if (m && YEARS_ALL.includes(m[1])) return [m[1]];
+    let m = nq.match(/\b(20[0-2]\d)\s*(?:to|till|until|through|thru|and|[-–])\s*(20[0-2]\d)\b/) || nq.match(/between\s+(20[0-2]\d)\s+and\s+(20[0-2]\d)/);
+    if (m) { const a = +m[1], b = +m[2]; return YEARS_ALL.filter(y => +y >= Math.min(a, b) && +y <= Math.max(a, b)); }
+    m = nq.match(/\b(?:since|from|after)\s+(20[0-2]\d)\b/); if (m) return YEARS_ALL.filter(y => +y >= +m[1]);
+    m = nq.match(/\b(?:before|until|till|up\s+to|prior\s+to)\s+(20[0-2]\d)\b/); if (m) return YEARS_ALL.filter(y => +y <= +m[1]);
     if (/\bthis\s+year\b/.test(nq)) return [YEARS_ALL[YEARS_ALL.length - 1]];
     if (/\blast\s+year\b/.test(nq)) return [YEARS_ALL[YEARS_ALL.length - 2]];
     if (/\b(recent|recently|lately|last\s+few\s+years|past\s+few\s+years|these\s+days)\b/.test(nq)) return YEARS_ALL.slice(-3);
+    m = nq.match(/\b(?:in\s+)?(20[0-2]\d)\b/); if (m && YEARS_ALL.includes(m[1])) return [m[1]];
     return YEARS_ALL;
   }
   function rtoAgg(list, years) {
@@ -3960,6 +3979,41 @@ render();
     let best = { s: 0, c: null };
     for (const c of RTO_CITY_SET) for (const t of toks) { if (t.length < 5) continue; const s = jaroWinkler(t, c); if (s > best.s) best = { s, c }; }
     return best.s >= 0.88 ? { title: RTO_CITY_INDEX[best.c][0].r.city, list: RTO_CITY_INDEX[best.c] } : null;
+  }
+  // Map a dealer city (robust aliases: vizag→visakhapatnam, hyd→hyderabad) onto
+  // RTO cities, which use different spellings ("Vishakapatnam") and zone suffixes
+  // ("Hyderabad-cz/ez/…" → aggregate all zones).
+  function rtosForDealerCity(dealerCityNorm) {
+    const first = dealerCityNorm.split(' ')[0];
+    const out = [];
+    RTOS.forEach((r, i) => {
+      const rc = norm(r.city);
+      const rcFirst = rc.split(' ')[0];
+      if (rc === dealerCityNorm || rcFirst === first || jaroWinkler(rcFirst, first) >= 0.9 || jaroWinkler(rc.replace(/ /g, ''), dealerCityNorm.replace(/ /g, '')) >= 0.9) out.push({ r, i });
+    });
+    return out;
+  }
+  function properCity(s) { return (s || '').replace(/\b\w/g, c => c.toUpperCase()); }
+  // Unified area resolver: exact RTO name/code → dealer-city (aggregates zones like
+  // Hyderabad's 5) → state → fuzzy RTO city.
+  function resolveMarketArea(q, nq) {
+    const toks = norm(q).split(' ').filter(Boolean);
+    // 1. exact RTO code
+    for (const t of toks) { const code = RTOS.find(r => r.code.toLowerCase() === t); if (code) return { title: `${code.city} (${code.code})`, list: [{ r: code, i: RTOS.indexOf(code) }] }; }
+    // 2. dealer city (robust aliases) → all its RTO zones — do this BEFORE exact
+    //    RTO-city match so "Hyderabad" aggregates cz/ez/nz/sz/wz, not just one.
+    const dc = findCityInQuery(q);
+    if (dc) { const list = rtosForDealerCity(dc); if (list.length) return { title: properCity(dc), list }; }
+    // 3. exact RTO city (for RTO-only areas like Adoni, Rangareddy)
+    for (let i = 0; i < toks.length - 1; i++) { const two = toks[i] + ' ' + toks[i + 1]; if (RTO_CITY_INDEX[two]) return { title: RTO_CITY_INDEX[two][0].r.city, list: RTO_CITY_INDEX[two] }; }
+    for (const t of toks) { if (RTO_CITY_INDEX[t]) return { title: RTO_CITY_INDEX[t][0].r.city, list: RTO_CITY_INDEX[t] }; }
+    // 4. state
+    const st = stateFromQuery(nq);
+    if (st) return { title: STATE_LABEL[st], list: rtosForState(st) };
+    // 5. fuzzy RTO city
+    let best = { s: 0, c: null };
+    for (const c of RTO_CITY_SET) for (const t of toks) { if (t.length < 5) continue; const s = jaroWinkler(t, c); if (s > best.s) best = { s, c }; }
+    return best.s >= 0.9 ? { title: RTO_CITY_INDEX[best.c][0].r.city, list: RTO_CITY_INDEX[best.c] } : null;
   }
   function pct(x) { return (x * 100).toFixed(1) + '%'; }
   function spanLabel(years) {
@@ -4047,32 +4101,33 @@ render();
     // A4.b: help / meta.
     if (HELP_RX.test(nq)) return showAnswer(helpText());
 
-    // Network coverage: "which cities / regions are we in".
-    if (COVERAGE_RX.test(nq)) return showAnswer(respondCoverage());
-
     // RTO / market: registrations, Maruti share, biggest markets, share ranking, trend.
-    if (MARKET_RX.test(nq)) {
-      const years = yearsFromQuery(nq);
-      const wantShare = SHARE_RX.test(nq);
-      // Ranking across RTOs (no specific area needed).
+    // Market questions push a 'market' scope so bare follow-ups ("and in Vizag")
+    // stay in market mode instead of falling back to the dealer-outlet view.
+    const marketFollowup = ctxMode === 'market' && !MARKET_RX.test(nq)
+      && (FOLLOWUP_RX.test(nq) || nq.split(' ').length <= 3)
+      && (findRtosInQuery(q) || findCityInQuery(q))
+      && !PEOPLE_RX.test(nq) && !COMMENTS_RX.test(nq) && !detectAspect(q)
+      && !AGG_BEST.test(nq) && !AGG_WORST.test(nq) && !LOCATE_RX.test(nq) && !WALK_RX.test(nq) && !COMPARE_RX.test(nq);
+    if (MARKET_RX.test(nq) || TREND_RX.test(nq) || marketFollowup) {
+      ctxMode = 'market';
+      const years = (MARKET_RX.test(nq) || TREND_RX.test(nq)) ? yearsFromQuery(nq) : (ctxYears || YEARS_ALL);
+      ctxYears = years;
       if (TREND_RX.test(nq)) {
-        const area = findRtosInQuery(q);
-        if (area) return showAnswer(respondTrend(area.title, area.list, wantShare ? 'share' : 'volume'));
-        // network trend
-        return showAnswer(respondTrend('the network', RTOS.map((r, i) => ({ r, i })), wantShare ? 'share' : 'volume'));
+        const kind = SHARE_RX.test(nq) ? 'share' : 'volume';
+        const area = resolveMarketArea(q, nq);
+        return showAnswer(respondTrend(area ? area.title : 'the network', area ? area.list : RTOS.map((r, i) => ({ r, i })), kind));
       }
-      if (wantShare && (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq) || /\bhighest\b/.test(nq))) {
-        return showAnswer(respondShareRanking(years, SMALLEST_RX.test(nq), parseTopN(nq) || 3));
+      const wantShare = SHARE_RX.test(nq) ? true : (MARKET_RX.test(nq) ? false : (ctxMarketKind === 'share'));
+      ctxMarketKind = wantShare ? 'share' : 'volume';
+      if (SHARE_RX.test(nq) && (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq) || /\bhighest\b/.test(nq) || /\blowest\b/.test(nq))) {
+        return showAnswer(respondShareRanking(years, SMALLEST_RX.test(nq) || /\blowest\b/.test(nq), parseTopN(nq) || 3));
       }
       if (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq)) {
-        // biggest/smallest market by volume (unless clearly about an outlet ranking)
         return showAnswer(respondBiggestMarkets(years, SMALLEST_RX.test(nq), parseTopN(nq) || 3));
       }
-      // Specific area (RTO city / code) or state, else whole network.
-      const stateCode = stateFromQuery(nq);
-      const area = findRtosInQuery(q);
+      const area = resolveMarketArea(q, nq);
       if (area) return showAnswer(respondMarket(area.title, area.list, years, wantShare ? 'share' : 'volume'));
-      if (stateCode) return showAnswer(respondMarket(STATE_LABEL[stateCode], rtosForState(stateCode), years, wantShare ? 'share' : 'volume'));
       return showAnswer(respondMarket('the whole network', RTOS.map((r, i) => ({ r, i })), years, wantShare ? 'share' : 'volume'));
     }
 
@@ -4144,7 +4199,7 @@ render();
     if (WALK_RX.test(nq) || COMPARE_RX.test(nq)) {
       let outs = gatherOutlets(q, 4);
       if (outs.length < 2) { const span = gatherOutletsSpan(q); if (span.length > outs.length) outs = span; }
-      if (outs.length >= 2) { walkthroughDealers(outs); return; }
+      if (outs.length >= 2) { walkthroughDealers(outs, detectAspect(q)); return; }
       if (outs.length === 1 && WALK_RX.test(nq)) {
         openDealer(outs[0].i); setOutletCtx(outs[0]);
         return showAnswer(narrateDealer(outs[0].d, ''));
@@ -4170,9 +4225,10 @@ render();
     }
 
     // Network-wide scope: "in the whole network / overall / total / entire group".
-    const isNetwork = /\b(network|overall|entire|everywhere|company|whole\s+(group|place|thing|network|company)|the\s+whole|all\s+outlets|all\s+regions|anywhere|in\s+all|total|do\s+we\s+have|we\s+have)\b/.test(nq) && !findCityInQuery(q) && !stateFromQuery(nq);
+    const isNetwork = /\b(network|overall|entire|everywhere|company|whole\s+(group|place|thing|network|company)|the\s+whole|all\s+outlets|all\s+regions|of\s+all|across\s+all|anywhere|in\s+all|total|do\s+we\s+have|we\s+have)\b/.test(nq) && !findCityInQuery(q) && !stateFromQuery(nq);
     // Global count: "how many total outlets do we have".
     if (AGG_COUNT.test(nq) && isNetwork) {
+      ctxAgg = 'count';
       const divFilter = divisionFilterFromQuery(q);
       let all = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d }));
       if (divFilter) all = all.filter(x => x.d.division === divFilter);
@@ -4289,9 +4345,17 @@ render();
       return showAnswer(`Varun Motors has ${list.length} ${label} in ${STATE_LABEL[stateCode]}${divFilter ? '' : ': ' + divBreakdown(list)}.`);
     }
 
+    // Bare "how many outlets" (no division/city/state/network) → focus city else total.
+    if (AGG_COUNT.test(nq) && !divisionFilterFromQuery(q) && !findCityInQuery(q) && !stateFromQuery(nq) && !isNetwork) {
+      ctxAgg = 'count';
+      if (lastCity) { const list = dealersInCity(lastCity); zoomToDealers(list); return showAnswer(`Varun Motors has ${list.length} outlets in ${list[0].d.city}: ${divBreakdown(list)}.`); }
+      const all = (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d }));
+      return showAnswer(`Varun Motors has ${all.length} outlets in total: ${divBreakdown(all)}.`);
+    }
     // Count by division with no explicit city: "how many Arena" → use the city in
     // focus if there is one, else the whole network.
     if (AGG_COUNT.test(nq) && divisionFilterFromQuery(q) && !findCityInQuery(q) && !stateFromQuery(nq) && !isNetwork) {
+      ctxAgg = 'count';
       const divFilter = divisionFilterFromQuery(q);
       if (lastCity) {
         const cityList = dealersInCity(lastCity);
@@ -4318,13 +4382,22 @@ render();
       return;
     }
 
-    // Bare-division follow-up: "in service" / "true value" after "best in Vizag"
-    // → carry the last ranking direction + city, filtered to that division.
+    // Bare-division follow-up: "in service" / "true value" / "nexa" after a ranking
+    // or a count → carry the last aggregation (best/worst/count) onto that division.
     if (divisionFilterFromQuery(q) && !AGG_BEST.test(nq) && !AGG_WORST.test(nq) && !AGG_COUNT.test(nq) &&
-        !findCityInQuery(q) && !nameScrub(q) && lastCity) {
+        !findCityInQuery(q) && !nameScrub(q) && ctxAgg) {
       const divFilter = divisionFilterFromQuery(q);
-      const scoped = dealersInCity(lastCity).filter(x => x.d.division === divFilter);
-      if (scoped.length) { doRanking(scoped, ctxAgg === 'worst', 1, `${DIV_LABEL[divFilter]} in ${dealersInCity(lastCity)[0].d.city}`); return; }
+      if (ctxAgg === 'count') {
+        const scope = lastCity ? dealersInCity(lastCity).filter(x => x.d.division === divFilter)
+          : (DASHBOARD_DATA.dealers || []).map((d, i) => ({ i, d })).filter(x => x.d.division === divFilter);
+        const where = lastCity ? 'in ' + dealersInCity(lastCity)[0].d.city : 'across the network';
+        zoomToDealers(scope);
+        return showAnswer(`Varun Motors has ${scope.length} ${DIV_LABEL[divFilter]} outlet${scope.length === 1 ? '' : 's'} ${where}.`);
+      }
+      if (lastCity) {
+        const scoped = dealersInCity(lastCity).filter(x => x.d.division === divFilter);
+        if (scoped.length) { doRanking(scoped, ctxAgg === 'worst', 1, `${DIV_LABEL[divFilter]} in ${dealersInCity(lastCity)[0].d.city}`); return; }
+      }
     }
 
     // A3: city-scoped aggregation. Runs BEFORE outlet lookup so a bare
@@ -4347,6 +4420,7 @@ render();
         const scoped = divFilter ? all.filter(({ d }) => d.division === divFilter) : all;
 
         if (AGG_COUNT.test(nq)) {
+          ctxAgg = 'count';
           zoomToDealers(scoped);
           const label = divFilter ? `${DIV_LABEL[divFilter]} outlets` : `outlets`;
           return showAnswer(`Varun Motors has ${scoped.length} ${label} in ${cityTitle}${divFilter ? '' : ': ' + divBreakdown(scoped)}.`);
