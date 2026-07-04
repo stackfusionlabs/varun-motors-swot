@@ -3739,6 +3739,7 @@ render();
   let ctxMode = null;            // 'market' when an RTO/market question is in focus
   let ctxMarketKind = null;      // 'share' | 'volume'
   let ctxYears = null;           // last year selection for market follow-ups
+  let ctxArea = null;            // last resolved market area {title, list} for "in 2025" follow-ups
   const OTHERWISE_RX = /\b(otherwise|other\s+way|the\s+other\s+way|instead|conversely|on\s+the\s+other\s+hand|flip\s+it|reverse)\b/;
   const FOLLOWUP_RX  = /^(how|what)\s+about\b|^and\b/;
   function detectEmotion(nq) {
@@ -3968,6 +3969,21 @@ render();
     return { cars, maruti, share: cars ? maruti / cars : 0 };
   }
   function rtosForState(code) { return RTOS.map((r, i) => ({ r, i })).filter(x => x.r.state === code); }
+  // Fly the map to the RTO(s) behind a market answer (rtoMarkers is parallel to RTOS).
+  function zoomToRtos(list) {
+    if (!list || !list.length || typeof map === 'undefined') return;
+    try {
+      if (list.length === 1) {
+        const e = (typeof rtoMarkers !== 'undefined') ? rtoMarkers[list[0].i] : null;
+        const r = list[0].r;
+        if (r && r.lat != null) map.flyTo([r.lat, r.lng], Math.max(map.getZoom(), 10), { duration: 0.6 });
+        if (e && e.marker) setTimeout(() => { try { e.marker.openPopup(); } catch (_) {} }, 650);
+        return;
+      }
+      const pts = list.map(({ r }) => [r.lat, r.lng]).filter(p => p[0] != null);
+      if (pts.length) map.flyToBounds(L.latLngBounds(pts), { padding: [60, 60], duration: 0.6, maxZoom: 11 });
+    } catch (e) {}
+  }
   function findRtosInQuery(q) {
     const toks = norm(q).split(' ').filter(Boolean);
     for (let i = 0; i < toks.length - 1; i++) { const two = toks[i] + ' ' + toks[i + 1]; if (RTO_CITY_INDEX[two]) return { title: RTO_CITY_INDEX[two][0].r.city, list: RTO_CITY_INDEX[two] }; }
@@ -4102,21 +4118,31 @@ render();
     if (HELP_RX.test(nq)) return showAnswer(helpText());
 
     // RTO / market: registrations, Maruti share, biggest markets, share ranking, trend.
-    // Market questions push a 'market' scope so bare follow-ups ("and in Vizag")
-    // stay in market mode instead of falling back to the dealer-outlet view.
-    const marketFollowup = ctxMode === 'market' && !MARKET_RX.test(nq)
+    // Market questions push a 'market' scope so bare follow-ups ("and in Vizag",
+    // "in 2025") stay in market mode instead of the dealer-outlet view.
+    const wasMarket = ctxMode === 'market';
+    const marketFollowup = wasMarket && !MARKET_RX.test(nq)
       && (FOLLOWUP_RX.test(nq) || nq.split(' ').length <= 3)
       && (findRtosInQuery(q) || findCityInQuery(q))
       && !PEOPLE_RX.test(nq) && !COMMENTS_RX.test(nq) && !detectAspect(q)
       && !AGG_BEST.test(nq) && !AGG_WORST.test(nq) && !LOCATE_RX.test(nq) && !WALK_RX.test(nq) && !COMPARE_RX.test(nq);
-    if (MARKET_RX.test(nq) || TREND_RX.test(nq) || marketFollowup) {
+    // Bare year/time follow-up ("in 2025", "since 2020") → re-run the last area.
+    const marketYearFollowup = wasMarket && !MARKET_RX.test(nq) && !TREND_RX.test(nq)
+      && /\b(20[0-2]\d|this\s+year|last\s+year|since|after|before|between|recent|all[\s-]?time|overall)\b/.test(nq)
+      && !findCityInQuery(q) && !findRtosInQuery(q) && !detectAspect(q) && !PEOPLE_RX.test(nq)
+      && !COMMENTS_RX.test(nq) && !AGG_BEST.test(nq) && !AGG_WORST.test(nq);
+    if (MARKET_RX.test(nq) || TREND_RX.test(nq) || marketFollowup || marketYearFollowup) {
       ctxMode = 'market';
-      const years = (MARKET_RX.test(nq) || TREND_RX.test(nq)) ? yearsFromQuery(nq) : (ctxYears || YEARS_ALL);
+      const explicit = MARKET_RX.test(nq) || TREND_RX.test(nq) || marketYearFollowup;
+      const years = explicit ? yearsFromQuery(nq) : (ctxYears || YEARS_ALL);
       ctxYears = years;
       if (TREND_RX.test(nq)) {
         const kind = SHARE_RX.test(nq) ? 'share' : 'volume';
-        const area = resolveMarketArea(q, nq);
-        return showAnswer(respondTrend(area ? area.title : 'the network', area ? area.list : RTOS.map((r, i) => ({ r, i })), kind));
+        const area = resolveMarketArea(q, nq) || (wasMarket ? ctxArea : null);
+        if (area) ctxArea = area;
+        const list = area ? area.list : RTOS.map((r, i) => ({ r, i }));
+        zoomToRtos(list);
+        return showAnswer(respondTrend(area ? area.title : 'the network', list, kind));
       }
       const wantShare = SHARE_RX.test(nq) ? true : (MARKET_RX.test(nq) ? false : (ctxMarketKind === 'share'));
       ctxMarketKind = wantShare ? 'share' : 'volume';
@@ -4126,9 +4152,11 @@ render();
       if (BIGGEST_RX.test(nq) || SMALLEST_RX.test(nq)) {
         return showAnswer(respondBiggestMarkets(years, SMALLEST_RX.test(nq), parseTopN(nq) || 3));
       }
-      const area = resolveMarketArea(q, nq);
-      if (area) return showAnswer(respondMarket(area.title, area.list, years, wantShare ? 'share' : 'volume'));
-      return showAnswer(respondMarket('the whole network', RTOS.map((r, i) => ({ r, i })), years, wantShare ? 'share' : 'volume'));
+      let area = resolveMarketArea(q, nq);
+      if (!area && (marketFollowup || marketYearFollowup) && ctxArea) area = ctxArea;
+      if (area) { ctxArea = area; zoomToRtos(area.list); return showAnswer(respondMarket(area.title, area.list, years, wantShare ? 'share' : 'volume')); }
+      const all = RTOS.map((r, i) => ({ r, i })); ctxArea = { title: 'the whole network', list: all };
+      return showAnswer(respondMarket('the whole network', all, years, wantShare ? 'share' : 'volume'));
     }
 
     // Navigate-only: "take me to / go to / open X" → open it and invite a question,
