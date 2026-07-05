@@ -3977,7 +3977,16 @@ render();
         const e = (typeof rtoMarkers !== 'undefined') ? rtoMarkers[list[0].i] : null;
         const r = list[0].r;
         if (r && r.lat != null) map.flyTo([r.lat, r.lng], Math.max(map.getZoom(), 10), { duration: 0.6 });
-        if (e && e.marker) setTimeout(() => { try { e.marker.openPopup(); } catch (_) {} }, 650);
+        if (e && e.marker) setTimeout(() => {
+          try {
+            e.marker.openPopup();
+            // Center the RTO chart popup in view (same as openDealer for outlets).
+            // Recenter twice: once immediately, once after the Chart.js trend chart
+            // renders and the popup grows.
+            requestAnimationFrame(() => requestAnimationFrame(() => ensurePopupInView(e.marker)));
+            setTimeout(() => { try { ensurePopupInView(e.marker); } catch (_) {} }, 500);
+          } catch (_) {}
+        }, 650);
         return;
       }
       const pts = list.map(({ r }) => [r.lat, r.lng]).filter(p => p[0] != null);
