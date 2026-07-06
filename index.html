@@ -823,6 +823,9 @@ DASHBOARD_DATA.rtos.forEach(r => {
   const m = L.marker([r.lat,r.lng], { icon: rtoIcon('#64748b',10) }).addTo(rtoLayer);
   m.bindTooltip('', { className:'custom-tooltip', direction:'top', offset:[0,-8] });
   m.bindPopup('', { maxWidth: 600, className: 'popup-rto-wrap', autoPan: false });
+  // Draw the trend chart when THIS marker's popup opens (per-marker handler is
+  // reliable; the map-level popupopen keyed on ev.layer was not resolving).
+  m.on('popupopen', () => initRtoChartWhenReady(r));
   rtoMarkers.push({ marker:m, data:r });
 });
 
