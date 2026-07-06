@@ -1360,18 +1360,19 @@ function drawRtoTrendChart(rto) {
 }
 
 // Hook into leaflet popupopen — if the opened popup belongs to an RTO, init the chart.
-// Use rAF chain + resize to ensure the canvas has real dimensions before Chart.js measures.
-function initRtoChartWhenReady(rto, attempts = 12) {
+// Draw as soon as the canvas is in the DOM (CSS already fixes its height to 180px),
+// then resize once the popup finishes settling. The old code gated on the canvas
+// having non-zero size and gave up after a few frames, so a direct click often
+// showed a blank chart until the user toggled Yearly/Monthly.
+function initRtoChartWhenReady(rto, attempts = 40) {
   if (attempts <= 0) return;
   requestAnimationFrame(() => {
     const canvas = document.getElementById(`rto-trend-${rto.code}`);
-    if (canvas && canvas.offsetWidth > 0 && canvas.offsetHeight > 0) {
-      drawRtoTrendChart(rto);
-      // Belt-and-braces: force a resize on the next frame in case popup autoPan is still settling
-      requestAnimationFrame(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch(e) {} });
-    } else {
-      initRtoChartWhenReady(rto, attempts - 1);
-    }
+    if (!canvas) { initRtoChartWhenReady(rto, attempts - 1); return; }  // popup DOM not ready yet
+    drawRtoTrendChart(rto);
+    // Re-measure a couple of times in case the popup is still opening/autoPanning.
+    requestAnimationFrame(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch (e) {} });
+    setTimeout(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch (e) {} }, 200);
   });
 }
 
