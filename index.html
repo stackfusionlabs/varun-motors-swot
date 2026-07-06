@@ -1360,20 +1360,22 @@ function drawRtoTrendChart(rto) {
 }
 
 // Hook into leaflet popupopen — if the opened popup belongs to an RTO, init the chart.
-// Draw as soon as the canvas is in the DOM (CSS already fixes its height to 180px),
-// then resize once the popup finishes settling. The old code gated on the canvas
-// having non-zero size and gave up after a few frames, so a direct click often
-// showed a blank chart until the user toggled Yearly/Monthly.
-function initRtoChartWhenReady(rto, attempts = 40) {
-  if (attempts <= 0) return;
-  requestAnimationFrame(() => {
-    const canvas = document.getElementById(`rto-trend-${rto.code}`);
-    if (!canvas) { initRtoChartWhenReady(rto, attempts - 1); return; }  // popup DOM not ready yet
-    drawRtoTrendChart(rto);
-    // Re-measure a couple of times in case the popup is still opening/autoPanning.
-    requestAnimationFrame(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch (e) {} });
-    setTimeout(() => { if (rtoTrendChart) try { rtoTrendChart.resize(); } catch (e) {} }, 200);
-  });
+// Draw as soon as the canvas is in the DOM, then do a FULL redraw once the popup has
+// laid out (same as the Yearly/Monthly toggle path, which is why toggling "fixed" it).
+// A bare resize() wasn't enough — if the first draw happened on a 0-width canvas the
+// chart never actually rendered.
+function initRtoChartWhenReady(rto) {
+  const code = rto.code;
+  let tries = 0;
+  const drawIfReady = () => {
+    if (document.getElementById(`rto-trend-${code}`)) { drawRtoTrendChart(rto); return true; }
+    if (tries++ < 20) requestAnimationFrame(drawIfReady);
+    return false;
+  };
+  requestAnimationFrame(drawIfReady);
+  // Redraws after the popup finishes opening/autopanning, so the canvas has real width.
+  setTimeout(() => { if (document.getElementById(`rto-trend-${code}`)) drawRtoTrendChart(rto); }, 260);
+  setTimeout(() => { if (document.getElementById(`rto-trend-${code}`)) drawRtoTrendChart(rto); }, 650);
 }
 
 map.on('popupopen', (ev) => {
