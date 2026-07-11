@@ -1331,6 +1331,9 @@ function drawRtoTrendChart(rto) {
   const state = rtoChartState[rto.code];
   const data = getRtoTrendData(rto, state.mode, state.year);
   if (rtoTrendChart) { try { rtoTrendChart.destroy(); } catch(e) {} rtoTrendChart = null; }
+  // Also kill any chart still bound to THIS canvas (stale instance from a prior
+  // open that popupclose didn't clean up) — otherwise Chart.js refuses to redraw.
+  try { const existing = (window.Chart && Chart.getChart) ? Chart.getChart(canvas) : null; if (existing) existing.destroy(); } catch(e) {}
   rtoTrendChart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -1539,7 +1542,8 @@ function maybeZoomToSeparate(hoveredIdx) {
 //   tearDownMiniMap();
 // });
 map.on('popupclose', (ev) => {
-  const found = rtoMarkers.find(x => x.marker === ev.layer);
+  const src = ev.popup && ev.popup._source;
+  const found = rtoMarkers.find(x => x.marker === (ev.layer || src));
   if (!found) return;
   if (rtoTrendChart) { try { rtoTrendChart.destroy(); } catch(e) {} rtoTrendChart = null; }
 });
@@ -3300,7 +3304,11 @@ render();
   // Allow a trailing name/filler ("hi Drishti", "hello there") after the greeting.
   const GREET_RX = /^(hi+|hey+|hay|hello+|helo|hii+|hola|namaste|yo|good\s+(morning|afternoon|evening))\b[\s,!.?]*(drishti|there|bot|drishthi)?[\s!.?]*$/i;
   // Allow any combination of farewell words in any order ("bye thank you", "thanks bye").
-  const BYE_RX   = /^((bye|goodbye|thanks|thank\s+you|cheers)[\s,!.?-]*)+(drishti|drishthi)?[\s!.?]*$/i;
+  // Farewell: closes the overlay. Match the actual word "bye"/"goodbye" (not "by"
+  // or "buy") when it ENDS the utterance — so "thanks, that was great info, bye!"
+  // still exits, but a mid-sentence "by the way…" does not. Plus standalone
+  // goodbye / see-you phrases anywhere.
+  const BYE_RX = /\bbye\b[\s!.?]*$|\bgood\s*bye\b|\bsee\s+(you|ya)(\s+later)?[\s!.?]*$|\bcatch\s+you\s+later\b|^(thanks|thank\s+you|cheers)[\s,!.?]*(drishti|drishthi)?[\s!.?]*$/i;
 
   function detectAspect(q) {
     const n = norm(q);
@@ -3986,6 +3994,10 @@ render();
         if (e && e.marker) setTimeout(() => {
           try {
             e.marker.openPopup();
+            // Draw the chart directly — the popup may already be open (repeat/
+            // follow-up market question about the same RTO), so popupopen won't
+            // re-fire; typeof-guard because it's defined in a later script block.
+            if (typeof initRtoChartWhenReady === 'function') initRtoChartWhenReady(r);
             // Center the RTO chart popup in view (same as openDealer for outlets).
             // Recenter twice: once immediately, once after the Chart.js trend chart
             // renders and the popup grows.
